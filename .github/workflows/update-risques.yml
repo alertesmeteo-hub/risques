@@ -2,6 +2,11 @@ name: Mise à jour Risques (vigilance HARMONIE, non officielle)
 
 on:
   workflow_dispatch:
+    inputs:
+      force:
+        description: "Retraiter même si rien n'a changé côté source (utile après un déploiement de code)"
+        type: boolean
+        default: false
   schedule:
     # Décalé par rapport au cron HARMONIE (27 */6 * * *) pour lui laisser le
     # temps de publier — mais un run vérifie d'abord si le run source a déjà
@@ -40,7 +45,8 @@ jobs:
           python scripts/update_risques.py \
             --harmonie-base-url "https://raw.githubusercontent.com/alertesmeteo-hub/harmonie/data" \
             --output-dir build/national \
-            --current-metadata-url "https://raw.githubusercontent.com/${{ github.repository }}/data/risques.json"
+            --current-metadata-url "https://raw.githubusercontent.com/${{ github.repository }}/data/risques.json" \
+            ${{ inputs.force && '--force' || '' }}
           if test -f build/national/risques.json; then
             echo "publish=true" >> "$GITHUB_OUTPUT"
           else
