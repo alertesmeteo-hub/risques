@@ -43,7 +43,7 @@ except ImportError:  # pragma: no cover - Python < 3.9 non pris en charge ici
 
 
 LOGGER = logging.getLogger("risques")
-PIPELINE_VERSION = "2.0.0"
+PIPELINE_VERSION = "2.0.1"
 PARIS_TZ = ZoneInfo("Europe/Paris") if ZoneInfo is not None else timezone.utc
 
 DEFAULT_HARMONIE_BASE_URL = (
@@ -191,6 +191,17 @@ def parse_args() -> argparse.Namespace:
 
 
 def already_published(session: requests.Session, metadata_url: str | None, run_time: datetime | None) -> bool:
+    """True seulement si le run HARMONIE ET la version du pipeline sont
+    identiques à ce qui est déjà publié.
+
+    Bug constaté en production : un changement de code (seuils, schéma)
+    poussé sans que le run HARMONIE source ait changé restait ignoré
+    indéfiniment — le run était déjà « publié » au sens de cette fonction,
+    donc le job sortait immédiatement sans jamais republier avec le
+    nouveau code. Comparer aussi ``pipeline_version`` force un retraitement
+    dès qu'un déploiement de code a eu lieu, même sans nouveau run source.
+    """
+
     if not metadata_url or run_time is None:
         return False
     try:
@@ -199,6 +210,8 @@ def already_published(session: requests.Session, metadata_url: str | None, run_t
             return False
         previous = response.json()
     except (requests.RequestException, ValueError):
+        return False
+    if previous.get("pipeline_version") != PIPELINE_VERSION:
         return False
     previous_run = previous.get("run_time")
     current_run = run_time.isoformat().replace("+00:00", "Z")
