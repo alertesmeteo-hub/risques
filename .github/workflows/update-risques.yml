@@ -57,7 +57,8 @@ jobs:
           payload = json.loads(Path("build/national/risques.json").read_text(encoding="utf-8"))
           assert payload["status"] == "ok"
           assert len(payload["departments"]) >= 80
-          assert len(payload["hazards"]) == 9
+          assert len(payload["hazards"]) == 10
+          assert set(payload["hazard_levels"].keys()) == set(payload["hazards"].keys())
           sample = next(iter(payload["departments"].values()))
           assert len(sample["daily"]) >= 1
           print(
