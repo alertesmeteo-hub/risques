@@ -43,7 +43,7 @@ except ImportError:  # pragma: no cover - Python < 3.9 non pris en charge ici
 
 
 LOGGER = logging.getLogger("risques")
-PIPELINE_VERSION = "2.6.0"
+PIPELINE_VERSION = "2.7.0"
 PARIS_TZ = ZoneInfo("Europe/Paris") if ZoneInfo is not None else timezone.utc
 
 DEFAULT_HARMONIE_BASE_URL = (
@@ -528,32 +528,31 @@ def hourly_hazard_levels(
     min_visibility = _nanpercentile_low(visibility)
     precip_now_repr = _nanpercentile_high(precipitation_now)
 
-    # Cocktail feu recalibré pour ne pas s'allumer sur une journée d'été
-    # ordinaire (ex. 30°C/40% d'humidité en France ne constitue pas un
-    # risque en soi) : il faut une chaleur ET une sécheresse de l'air
-    # réellement marquées pour que le score grimpe.
-    fire_score = 0
-    if np.isfinite(max_temperature):
-        if max_temperature >= 35:
-            fire_score += 2
-        elif max_temperature >= 30:
-            fire_score += 1
-    if np.isfinite(min_humidity):
-        if min_humidity <= 25:
-            fire_score += 2
-        elif min_humidity <= 35:
-            fire_score += 1
-    if np.isfinite(max_wind) and max_wind >= 35:
-        fire_score += 1
-    # Le cumul de précipitations part de 0 au début de la série disponible
-    # (pas d'observations passées dans ce pipeline) : sur le premier jour,
-    # « moins de 1 mm cumulé » est donc presque toujours vrai par simple
-    # effet de démarrage, pas parce qu'il fait réellement sec — constaté en
-    # production (point +1 quasi systématique en J0). On n'accorde ce point
-    # qu'à partir d'une trentaine d'heures de série, quand le cumul reflète
-    # un vrai créneau sans pluie plutôt qu'un compteur qui vient de démarrer.
-    if step_index >= 24 and cumulative_precip_mm < 1.0:
-        fire_score += 1
+    # Cocktail feu : chaleur, air sec ET vent doivent être réunis
+    # SIMULTANÉMENT — un seul facteur seul ne doit jamais suffire (constaté
+    # en production : des départements de montagne classés « Faible »
+    # uniquement parce qu'il n'avait pas plu récemment dans le modèle, sans
+    # aucune chaleur ni air sec ni vent réels ce jour-là — l'ancien score
+    # additif accordait ce point de sécheresse indépendamment du reste).
+    fire_level = 0
+    if (
+        np.isfinite(max_temperature) and np.isfinite(min_humidity) and np.isfinite(max_wind)
+        and max_temperature >= 30.0 and min_humidity <= 40.0 and max_wind >= 20.0
+    ):
+        fire_level = 1
+        if max_temperature >= 33.0 and min_humidity <= 30.0 and max_wind >= 30.0:
+            fire_level = 2
+        if max_temperature >= 36.0 and min_humidity <= 25.0 and max_wind >= 40.0:
+            fire_level = 3
+        if max_temperature >= 39.0 and min_humidity <= 20.0 and max_wind >= 50.0:
+            fire_level = 4
+        # Sécheresse récente confirmée (cumul de pluie quasi nul depuis le
+        # début de la série, à partir d'une trentaine d'heures pour éviter
+        # l'effet de démarrage à zéro du compteur) : aggrave d'un cran un
+        # risque déjà présent par chaleur+air sec+vent, mais ne peut plus,
+        # à elle seule, faire naître un risque là où il n'y en a pas.
+        if step_index >= 24 and cumulative_precip_mm < 1.0:
+            fire_level = min(4, fire_level + 1)
 
     # Grêle : météorologiquement impossible sans précipitation en cours
     # (la grêle est une forme de précipitation convective) — un code de
@@ -578,7 +577,7 @@ def hourly_hazard_levels(
         "chaleur": _threshold_level(max_temperature, CHALEUR_THRESHOLDS),
         "froid": _threshold_level_below(min_temperature, FROID_THRESHOLDS_BELOW),
         "brouillard": _threshold_level_below(min_visibility, (1.0, 0.5, 0.2, 0.1)),
-        "feu": int(min(4, fire_score)),
+        "feu": fire_level,
     }
     return hazards, raw_extremes
 
