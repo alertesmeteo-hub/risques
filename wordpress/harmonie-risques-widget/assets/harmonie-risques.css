@@ -247,6 +247,14 @@
     color: #0d47a1;
 }
 
+/* Onglets de jour (J0/J1/J2) : rouge plutôt que le bleu des onglets
+   d'aléa, sur demande explicite. */
+.hrw-day-tabs .hrw-tab.is-active {
+    background: #e0342c;
+    border-color: #e0342c;
+    color: #fff;
+}
+
 .hrw-fire-disclaimer {
     margin: 0;
     padding: 10px 24px;
@@ -503,11 +511,13 @@
     background: var(--hrw-panel);
     border: 1px solid var(--hrw-border);
     cursor: pointer;
-    /* Hauteur stable quel que soit le nombre de lignes du libellé de
-       niveau (« Nul » vs « Risque de pluie verglaçante (2/3) ») : sinon
-       la grille — donc tout le panneau — changeait de hauteur en changeant
-       de département. */
-    min-height: 74px;
+    /* Hauteur FIXE (pas min-height) et contenu tronqué si besoin : le
+       nombre d'alertes actives change combien de cellules ont un libellé
+       long (« Risque de pluie verglaçante » vs « Nul »), et un simple
+       min-height pouvait encore être dépassé — la grille (donc tout le
+       panneau) changeait alors de hauteur selon le nombre d'alertes. */
+    height: 92px;
+    overflow: hidden;
 }
 
 .hrw-hazard-cell.is-active {

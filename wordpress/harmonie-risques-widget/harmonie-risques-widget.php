@@ -3,7 +3,7 @@
  * Plugin Name: Carte de Vigilance HARMONIE (risques)
  * Plugin URI: https://github.com/alertesmeteo-hub/risques
  * Description: Carte de risques météo non officielle (10 aléas, échelle propre à chaque aléa, J/J+1/J+2) dérivée du modèle HARMONIE, avec recherche de commune, géolocalisation et frises horaires.
- * Version: 2.3.0
+ * Version: 2.4.0
  * Author: Alertes Météo Hub
  * Requires at least: 5.8
  * Requires PHP: 7.4
@@ -14,7 +14,7 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-define('HRW_VERSION', '2.3.0');
+define('HRW_VERSION', '2.4.0');
 define('HRW_RELEASE_DATE', '2026-08-25');
 define('HRW_OPTION_BASE_URL', 'hrw_risques_data_base_url');
 define(

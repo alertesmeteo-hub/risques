@@ -43,7 +43,7 @@ except ImportError:  # pragma: no cover - Python < 3.9 non pris en charge ici
 
 
 LOGGER = logging.getLogger("risques")
-PIPELINE_VERSION = "2.3.0"
+PIPELINE_VERSION = "2.4.0"
 PARIS_TZ = ZoneInfo("Europe/Paris") if ZoneInfo is not None else timezone.utc
 
 DEFAULT_HARMONIE_BASE_URL = (
@@ -383,15 +383,23 @@ FROID_THRESHOLDS_BELOW = (-3.0, -6.0, -10.0, -15.0, -20.0, -30.0)
 
 # Les libellés de légende intègrent directement le seuil réel plutôt qu'un
 # mot seul — demandé explicitement, « qu'il faut mettre en légende ».
-# Chaleur/Pluie/Vent : uniquement le seuil, sans mot générique (``bare``).
+# Pluie/Vent : uniquement le seuil, sans mot générique (``bare``).
 # Complète les entrées vides laissées dans HAZARD_LEVELS plus haut (qui
 # doivent rester en phase avec ces constantes plutôt que dupliquer les
 # seuils à deux endroits).
-HAZARD_LEVELS["chaleur"] = _numeric_tier_labels(CHALEUR_THRESHOLDS, "°C", bare=True)
 HAZARD_LEVELS["pluie_inondation"] = _numeric_tier_labels(PLUIE_THRESHOLDS_MM, "mm", bare=True)
 HAZARD_LEVELS["vent"] = _numeric_tier_labels(VENT_THRESHOLDS_KMH, "km/h", bare=True)
 HAZARD_LEVELS["neige"] = _numeric_tier_labels(NEIGE_THRESHOLDS_CM, "cm")
 HAZARD_LEVELS["froid"] = _numeric_tier_labels(FROID_THRESHOLDS_BELOW, "°C", below=True)
+
+# Chaleur : mot + seuil rétabli (contrairement à Pluie/Vent, restés
+# « bare ») — mais au féminin (« la chaleur ») : Modérée/Marquée/Forte/
+# Très forte, pas Modéré/Marqué/Fort/Très fort.
+_CHALEUR_TIER_NAMES = ["Faible", "Modérée", "Marquée", "Forte", "Très forte", "Intense", "Extrême"]
+HAZARD_LEVELS["chaleur"] = ["Nul"] + [
+    f"{name} (≥ {threshold:g} °C)"
+    for name, threshold in zip(_CHALEUR_TIER_NAMES, CHALEUR_THRESHOLDS)
+]
 
 
 def _safe_max(values: np.ndarray) -> float:
