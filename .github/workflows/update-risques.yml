@@ -1,0 +1,84 @@
+name: Mise à jour Risques (vigilance HARMONIE, non officielle)
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Décalé par rapport au cron HARMONIE (27 */6 * * *) pour lui laisser le
+    # temps de publier — mais un run vérifie d'abord si le run source a déjà
+    # été traité (via --current-metadata-url) avant de faire le travail, donc
+    # une fréquence horaire ne coûte quasi rien la plupart du temps.
+    - cron: "50 * * * *"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: risques-production
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+
+    steps:
+      - name: Récupérer le dépôt
+        uses: actions/checkout@v7
+
+      - name: Installer Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Installer les dépendances
+        run: python -m pip install --disable-pip-version-check -r requirements.txt
+
+      - name: Calculer les risques à partir des données HARMONIE publiées
+        id: build
+        run: |
+          python scripts/update_risques.py \
+            --harmonie-base-url "https://raw.githubusercontent.com/alertesmeteo-hub/harmonie/data" \
+            --output-dir build/national \
+            --current-metadata-url "https://raw.githubusercontent.com/${{ github.repository }}/data/risques.json"
+          if test -f build/national/risques.json; then
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Vérifier la publication
+        if: steps.build.outputs.publish == 'true'
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          payload = json.loads(Path("build/national/risques.json").read_text(encoding="utf-8"))
+          assert payload["status"] == "ok"
+          assert len(payload["departments"]) >= 80
+          assert len(payload["hazards"]) == 9
+          sample = next(iter(payload["departments"].values()))
+          assert len(sample["daily"]) >= 1
+          print(
+              f"Validation OK : {len(payload['departments'])} départements, "
+              f"run {payload.get('run_time', '?')}"
+          )
+          PY
+
+      - name: Publier sur la branche data
+        if: steps.build.outputs.publish == 'true'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          publish_dir="$(mktemp -d)"
+          cp -R build/national/. "$publish_dir/"
+          git init -b data "$publish_dir"
+          git -C "$publish_dir" config user.name "github-actions[bot]"
+          git -C "$publish_dir" config user.email \
+            "41898282+github-actions[bot]@users.noreply.github.com"
+          git -C "$publish_dir" add .
+          git -C "$publish_dir" commit -m "Mise à jour Risques"
+          git -C "$publish_dir" push --force \
+            "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
+            HEAD:data
