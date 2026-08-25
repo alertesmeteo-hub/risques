@@ -34,10 +34,16 @@
             { tag: 'path', d: 'M3 13h14.5a3 3 0 1 1-2.6 4.6', stroke: 'currentColor', 'stroke-width': 2.2, 'stroke-linecap': 'round', fill: 'none' },
             { tag: 'path', d: 'M3 18h9', stroke: 'currentColor', 'stroke-width': 2.2, 'stroke-linecap': 'round', fill: 'none' }
         ],
-        neige_verglas: [
+        neige: [
             { tag: 'line', x1: 12, y1: 2, x2: 12, y2: 22, stroke: 'currentColor', 'stroke-width': 2, 'stroke-linecap': 'round' },
             { tag: 'line', x1: 4.2, y1: 7, x2: 19.8, y2: 17, stroke: 'currentColor', 'stroke-width': 2, 'stroke-linecap': 'round' },
             { tag: 'line', x1: 19.8, y1: 7, x2: 4.2, y2: 17, stroke: 'currentColor', 'stroke-width': 2, 'stroke-linecap': 'round' }
+        ],
+        verglas: [
+            { tag: 'ellipse', cx: 12, cy: 16.5, rx: 8, ry: 3.2, fill: 'currentColor', opacity: '.35' },
+            { tag: 'line', x1: 7, y1: 15, x2: 10, y2: 11.5, stroke: 'currentColor', 'stroke-width': 2, 'stroke-linecap': 'round' },
+            { tag: 'line', x1: 12, y1: 14.5, x2: 15, y2: 9.5, stroke: 'currentColor', 'stroke-width': 2, 'stroke-linecap': 'round' },
+            { tag: 'line', x1: 16, y1: 15, x2: 19, y2: 10.5, stroke: 'currentColor', 'stroke-width': 2, 'stroke-linecap': 'round' }
         ],
         chaleur: [
             { tag: 'circle', cx: 12, cy: 12, r: 4.2, fill: 'currentColor' },
@@ -95,7 +101,8 @@
         grele: 'Des chutes de grêle sont possibles. Mettez à l’abri les véhicules et objets fragiles si besoin.',
         pluie_inondation: 'De fortes pluies peuvent provoquer des ruissellements ou des inondations locales. Évitez les sous-sols et les zones habituellement inondables.',
         vent: 'Des rafales de vent sont attendues. Évitez les activités exposées et rangez les objets susceptibles de s’envoler.',
-        neige_verglas: 'Neige ou verglas peuvent rendre les routes glissantes. Adaptez votre conduite et anticipez vos déplacements.',
+        neige: 'De la neige est possible et peut rendre les routes glissantes. Adaptez votre conduite et anticipez vos déplacements.',
+        verglas: 'Des plaques de verglas ou de la pluie verglaçante sont possibles. Réduisez votre vitesse, augmentez les distances de sécurité.',
         chaleur: 'Des températures élevées sont attendues. Hydratez-vous régulièrement et évitez les efforts aux heures les plus chaudes.',
         froid: 'Des températures basses sont attendues. Protégez-vous du froid et limitez les expositions prolongées.',
         brouillard: 'La visibilité peut être fortement réduite. Réduisez votre vitesse et augmentez les distances de sécurité.',
@@ -360,9 +367,15 @@
             return hourPart ? Number(hourPart.value) : 0;
         }
 
-        function levelInfo(level) {
-            var info = manifest && manifest.levels ? manifest.levels[String(level)] : null;
+        function levelInfo(hazard, level) {
+            var scale = manifest && manifest.hazard_levels ? manifest.hazard_levels[hazard] : null;
+            var info = scale ? scale[String(level)] : null;
             return info || { label: 'Inconnu', color: '#555' };
+        }
+
+        function maxLevelFor(hazard) {
+            var scale = manifest && manifest.hazard_levels ? manifest.hazard_levels[hazard] : null;
+            return scale ? Object.keys(scale).length - 1 : 4;
         }
 
         function hazardLabel(hazard) {
@@ -381,7 +394,7 @@
         function paintMap() {
             Object.keys(mapEntries).forEach(function (code) {
                 var level = departmentLevel(code, currentHazard, currentDayIndex);
-                var color = levelInfo(level).color;
+                var color = levelInfo(currentHazard, level).color;
                 var showIconForLevel = level >= ICON_MIN_LEVEL;
                 mapEntries[code].forEach(function (entry) {
                     entry.path.setAttribute('fill', color);
@@ -398,9 +411,13 @@
         }
 
         function buildLegend() {
+            // L'échelle (nombre de paliers, libellés) dépend de l'aléa
+            // affiché — la légende est donc reconstruite à chaque
+            // changement d'aléa plutôt que dessinée une seule fois.
             legend.replaceChildren();
-            for (var level = 0; level <= 4; level++) {
-                var info = levelInfo(level);
+            var maxLevel = maxLevelFor(currentHazard);
+            for (var level = 0; level <= maxLevel; level++) {
+                var info = levelInfo(currentHazard, level);
                 var item = document.createElement('div');
                 item.className = 'hrw-legend-item';
                 var swatch = document.createElement('span');
@@ -462,6 +479,7 @@
             if (hazard === 'feu' && manifest) {
                 fireDisclaimer.textContent = '⚠️ ' + manifest.fire_disclaimer;
             }
+            buildLegend();
             paintMap();
             renderDetail();
         }
@@ -507,7 +525,7 @@
             detailGrid.replaceChildren();
             Object.keys(manifest.hazards).forEach(function (hazard) {
                 var level = hazards[hazard] || 0;
-                var info = levelInfo(level);
+                var info = levelInfo(hazard, level);
                 var cell = document.createElement('div');
                 cell.className = 'hrw-hazard-cell';
                 cell.classList.toggle('is-active', hazard === detailHazard);
@@ -535,7 +553,11 @@
         function renderAdvice(level) {
             if (!adviceText) { return; }
             var message = ADVICE[detailHazard] || '';
-            if (level >= 3) {
+            // Seuil d'escalade relatif au nombre de paliers de l'aléa (les
+            // échelles n'ont plus toutes 5 paliers) : les ~40% les plus
+            // sévères déclenchent la phrase de vigilance renforcée.
+            var maxLevel = maxLevelFor(detailHazard);
+            if (level >= Math.ceil(maxLevel * 0.6)) {
                 message += ' Restez particulièrement vigilant et suivez l’évolution de la situation.';
             }
             adviceText.textContent = message;
@@ -575,7 +597,7 @@
             var formatter = hourFormatter();
             cells.forEach(function (entry, index) {
                 var level = (entry.hazards || {})[detailHazard] || 0;
-                var info = levelInfo(level);
+                var info = levelInfo(detailHazard, level);
                 var localDate = new Date(entry.time);
                 var isClosing = !!closingEntry && index === cells.length - 1;
 
@@ -626,7 +648,7 @@
             var dayEntry = department.daily[currentDayIndex];
             if (!dayEntry) { return; }
             var level = (dayEntry.hazards || {})[currentHazard] || 0;
-            var info = levelInfo(level);
+            var info = levelInfo(currentHazard, level);
 
             tooltip.replaceChildren();
             var title = document.createElement('div');
@@ -650,7 +672,7 @@
                 dayHours.forEach(function (entry) {
                     var hourLevel = (entry.hazards || {})[currentHazard] || 0;
                     var segment = document.createElement('span');
-                    segment.style.backgroundColor = levelInfo(hourLevel).color;
+                    segment.style.backgroundColor = levelInfo(currentHazard, hourLevel).color;
                     mini.appendChild(segment);
                 });
                 tooltip.appendChild(mini);

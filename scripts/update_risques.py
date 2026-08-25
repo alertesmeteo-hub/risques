@@ -1,19 +1,21 @@
 #!/usr/bin/env python3
-"""Calcule une carte de vigilance météo (9 aléas, 5 niveaux, non officielle)
-à partir des fichiers départementaux déjà publiés par le hub `harmonie`.
+"""Calcule une carte de vigilance météo (10 aléas, échelle propre à chaque
+aléa, non officielle) à partir des fichiers départementaux déjà publiés par
+le hub `harmonie`.
 
 Contrairement au pipeline HARMONIE (qui décode les GRIB du KNMI), ce script
 ne télécharge aucune archive météo : il lit les 96 fichiers
 ``departements/XX.json`` déjà publiés sur la branche ``data`` du dépôt
-``harmonie`` (mêmes données, déjà décodées et compactées), en dérive 9 aléas
-par département pour J / J+1 / J+2, et republie ``risques.json``.
+``harmonie`` (mêmes données, déjà décodées et compactées), en dérive 10
+aléas par département pour J / J+1 / J+2, et republie ``risques.json``.
 
-Cinq des neuf aléas réutilisent directement des diagnostics déjà calculés
-par le pipeline HARMONIE (mêmes noms de colonne que dans
-``update_harmonie_france.py::VALUE_COLUMNS``, échelle 0-4 déjà en place) :
-orages, grêle, pluie-inondation, vent, neige-verglas. Les quatre autres
-(chaleur, froid, brouillard, feu) sont calculés ici à partir des champs
-bruts (température, humidité, vent, précipitations, visibilité).
+Trois aléas réutilisent directement des codes de risque déjà calculés par
+le pipeline HARMONIE (0-4, cf. ``update_harmonie_france.py::VALUE_COLUMNS``) :
+orages, grêle (avec une garde : pas de grêle sans pluie en cours), verglas
+(dérivé de ``snow_stick_risk_code``). Les autres sont calculés ici à partir
+de seuils numériques explicites propres à chaque aléa (température, cumul
+de pluie/neige, rafales, visibilité) — voir ``HAZARD_LEVELS`` et les
+constantes ``*_THRESHOLDS*`` ci-dessous pour le détail des paliers.
 
 L'aléa « feu » est un simple cocktail météo (température, humidité, vent,
 pluie récente) : il ne remplace pas Météo des forêts et doit toujours être
@@ -41,7 +43,7 @@ except ImportError:  # pragma: no cover - Python < 3.9 non pris en charge ici
 
 
 LOGGER = logging.getLogger("risques")
-PIPELINE_VERSION = "1.5.0"
+PIPELINE_VERSION = "2.0.0"
 PARIS_TZ = ZoneInfo("Europe/Paris") if ZoneInfo is not None else timezone.utc
 
 DEFAULT_HARMONIE_BASE_URL = (
@@ -53,7 +55,8 @@ HAZARDS = (
     "grele",
     "pluie_inondation",
     "vent",
-    "neige_verglas",
+    "neige",
+    "verglas",
     "chaleur",
     "froid",
     "brouillard",
@@ -65,28 +68,82 @@ HAZARD_LABELS = {
     "grele": "Grêle",
     "pluie_inondation": "Pluie-inondation",
     "vent": "Vent",
-    "neige_verglas": "Neige-verglas",
+    "neige": "Neige",
+    "verglas": "Verglas",
     "chaleur": "Chaleur",
     "froid": "Froid",
     "brouillard": "Brouillard",
     "feu": "Feu",
 }
 
-LEVEL_LABELS = {0: "Minime", 1: "Faible", 2: "Modéré", 3: "Fort", 4: "Sévère"}
-# Palette pastel/claire (fond blanc), dans l'esprit vert/jaune/orange/rouge
-# de la vigilance météo habituelle mais adoucie pour rester lisible sur
-# blanc — la distinction entre niveaux repose sur les bordures de
-# département (toujours foncées), pas sur un contraste de fond agressif.
-# Le niveau 4 (Sévère/extrême) est en violet plutôt qu'en rouge : au-delà
-# du rouge, c'est la convention usuelle pour marquer qu'on sort de l'échelle
-# habituelle vert/jaune/orange/rouge.
-LEVEL_COLORS = {
-    0: "#e8f5e9",
-    1: "#a5d6a7",
-    2: "#fff59d",
-    3: "#ffcc80",
-    4: "#ce93d8",
+# Chaque aléa a sa propre échelle (nombre de paliers et libellés) au lieu
+# d'une échelle 0-4 unique partagée par tous : demandé explicitement pour
+# refléter des critères réels (ex. cumul de pluie en mm, rafales en km/h)
+# plutôt qu'un simple code générique. Le palier 0 est toujours « Nul ».
+#
+# Rampe de couleurs pastel commune à toutes les échelles (vert → jaune →
+# orange → rouge → violet), seule la longueur varie selon le nombre de
+# paliers de l'aléa.
+_RAMP_5 = ["#e8f5e9", "#a5d6a7", "#fff59d", "#ffcc80", "#ce93d8"]
+_RAMP_8 = [
+    "#e8f5e9", "#c5e1a5", "#fff59d", "#ffe082",
+    "#ffb74d", "#ff8a65", "#e57373", "#ce93d8",
+]
+_RAMP_4 = ["#e8f5e9", "#fff59d", "#ffb74d", "#ce93d8"]
+
+# Libellés génériques réutilisés pour les aléas à seuils numériques (aucun
+# nom n'a été fourni palier par palier pour chaleur/pluie/vent/froid/neige,
+# seulement des valeurs) — à ajuster si un vocabulaire différent est
+# préféré.
+_TIERS_7 = ["Faible", "Modéré", "Marqué", "Fort", "Très fort", "Intense", "Extrême"]
+
+HAZARD_LEVELS: dict[str, list[str]] = {
+    # Aléas à code de risque HARMONIE (0-4, passthrough) : mêmes libellés
+    # génériques pour les deux, dans l'esprit fourni pour les orages.
+    "orages": ["Nul", "Faible / Modéré", "Marqué / Fort", "Intense / Violent", "Extrême"],
+    "grele": ["Nul", "Faible / Modéré", "Marqué / Fort", "Intense / Violent", "Extrême"],
+    "brouillard": ["Nul", "Faible", "Modéré", "Fort", "Sévère"],
+    # Aléas à seuils numériques (7 paliers + Nul).
+    "pluie_inondation": ["Nul", *_TIERS_7],
+    "vent": ["Nul", *_TIERS_7],
+    "chaleur": ["Nul", *_TIERS_7],
+    "froid": ["Nul", *_TIERS_7],
+    "neige": ["Nul", *_TIERS_7],
+    # Verglas : 3 paliers qualitatifs fournis explicitement.
+    "verglas": [
+        "Nul",
+        "Risque de verglas au sol",
+        "Risque de pluie verglaçante",
+        "Pluie verglaçante durable",
+    ],
+    # Feu : inchangé, 0-4 générique.
+    "feu": ["Nul", "Faible", "Modéré", "Fort", "Sévère"],
 }
+
+
+def _ramp_for(level_count: int) -> list[str]:
+    if level_count == 5:
+        return _RAMP_5
+    if level_count == 8:
+        return _RAMP_8
+    if level_count == 4:
+        return _RAMP_4
+    raise ValueError(f"Pas de rampe de couleurs définie pour {level_count} paliers")
+
+
+def hazard_levels_manifest() -> dict[str, dict[str, dict[str, str]]]:
+    """Construit la section ``hazard_levels`` de risques.json : libellé et
+    couleur pour chaque palier de chaque aléa, à partir de HAZARD_LEVELS."""
+
+    manifest: dict[str, dict[str, dict[str, str]]] = {}
+    for hazard, labels in HAZARD_LEVELS.items():
+        ramp = _ramp_for(len(labels))
+        manifest[hazard] = {
+            str(level): {"label": label, "color": ramp[level]}
+            for level, label in enumerate(labels)
+        }
+    return manifest
+
 
 FIRE_DISCLAIMER = (
     "Indice non officiel (cocktail météo chaleur/humidité/vent/pluie). "
@@ -236,8 +293,9 @@ def _risk_column_level(values: np.ndarray, cap: int = 4) -> int:
     return int(min(cap, max(0, round(_nanpercentile_high(values)))))
 
 
-def _threshold_level(value: float, thresholds: tuple[float, float, float, float]) -> int:
-    """Paliers croissants : renvoie le niveau (0-4) atteint par ``value``."""
+def _threshold_level(value: float, thresholds: tuple[float, ...]) -> int:
+    """Paliers croissants : renvoie le niveau (0 à len(thresholds)) atteint
+    par ``value``. ``thresholds`` doit être trié en ordre croissant."""
 
     if not np.isfinite(value):
         return 0
@@ -248,9 +306,10 @@ def _threshold_level(value: float, thresholds: tuple[float, float, float, float]
     return level
 
 
-def _threshold_level_below(value: float, thresholds: tuple[float, float, float, float]) -> int:
+def _threshold_level_below(value: float, thresholds: tuple[float, ...]) -> int:
     """Comme ``_threshold_level`` mais pour un aléa qui s'aggrave quand la
-    valeur DIMINUE (visibilité, température minimale)."""
+    valeur DIMINUE (visibilité, température minimale). ``thresholds`` doit
+    être trié en ordre DÉCROISSANT (du moins sévère au plus sévère)."""
 
     if not np.isfinite(value):
         return 0
@@ -261,10 +320,35 @@ def _threshold_level_below(value: float, thresholds: tuple[float, float, float, 
     return level
 
 
+# Seuils numériques (ascendants) fournis explicitement pour chaque aléa —
+# le nombre de valeurs fixe le nombre de paliers (7 seuils -> 8 paliers dont
+# Nul). ``_threshold_level`` incrémente le niveau à chaque seuil atteint ou
+# dépassé, donc ces tuples doivent rester en ordre croissant.
+CHALEUR_THRESHOLDS = (25.0, 28.0, 31.0, 34.0, 37.0, 40.0, 45.0)
+PLUIE_THRESHOLDS_MM = (15.0, 30.0, 50.0, 80.0, 150.0, 300.0, 500.0)
+VENT_THRESHOLDS_KMH = (80.0, 90.0, 100.0, 110.0, 130.0, 150.0, 180.0)
+NEIGE_THRESHOLDS_CM = (0.1, 1.0, 3.0, 7.0, 15.0, 30.0, 50.0)
+# ``_threshold_level_below`` a besoin de l'ordre inverse (du seuil le plus
+# « chaud »/le moins sévère au plus froid) — cf. sa docstring.
+FROID_THRESHOLDS_BELOW = (1.0, -3.0, -6.0, -10.0, -15.0, -20.0, -30.0)
+
+
 def hourly_hazard_levels(
-    series: DepartmentSeries, step_index: int, cumulative_precip_mm: float
+    series: DepartmentSeries,
+    step_index: int,
+    cumulative_precip_mm: float,
+    day_precip_mm: float,
+    day_snow_cm: float,
 ) -> dict[str, int]:
-    """Niveau 0-4 de chaque aléa pour un département, à une échéance donnée."""
+    """Niveau de chaque aléa pour un département, à une échéance donnée.
+
+    ``cumulative_precip_mm`` ne se réinitialise jamais (utilisé par Feu,
+    proxy de sécheresse récente) ; ``day_precip_mm``/``day_snow_cm`` sont
+    des cumuls glissants remis à zéro à chaque changement de journée
+    calendaire Europe/Paris (utilisés par Pluie-inondation et Neige, dont
+    les seuils sont désormais des cumuls en mm/cm et non plus une valeur
+    instantanée).
+    """
 
     def col(name: str) -> np.ndarray:
         return series.column(step_index, name)
@@ -272,7 +356,9 @@ def hourly_hazard_levels(
     temperature = col("temperature_c")
     humidity = col("humidity_pct")
     wind_speed = col("wind_speed_kmh")
+    wind_gust = col("wind_gust_kmh")
     visibility = col("visibility_km")
+    precipitation_now = col("precipitation_mm")
 
     # Perçentiles plutôt que max/min strict : même correction que pour les
     # aléas à code de risque (cf. _nanpercentile_high) — une seule commune
@@ -281,7 +367,9 @@ def hourly_hazard_levels(
     min_temperature = _nanpercentile_low(temperature)
     min_humidity = _nanpercentile_low(humidity)
     max_wind = _nanpercentile_high(wind_speed)
+    max_gust = _nanpercentile_high(wind_gust)
     min_visibility = _nanpercentile_low(visibility)
+    precip_now_repr = _nanpercentile_high(precipitation_now)
 
     # Cocktail feu recalibré pour ne pas s'allumer sur une journée d'été
     # ordinaire (ex. 30°C/40% d'humidité en France ne constitue pas un
@@ -310,19 +398,28 @@ def hourly_hazard_levels(
     if step_index >= 24 and cumulative_precip_mm < 1.0:
         fire_score += 1
 
+    # Grêle : météorologiquement impossible sans précipitation en cours
+    # (la grêle est une forme de précipitation convective) — un code de
+    # risque non nul sans pluie mesurable à cette heure est ignoré plutôt
+    # que reporté tel quel.
+    grele_level = _risk_column_level(col("hail_risk_code"))
+    if not np.isfinite(precip_now_repr) or precip_now_repr < 0.1:
+        grele_level = 0
+
     return {
         "orages": _risk_column_level(col("thunder_risk_code")),
-        "grele": _risk_column_level(col("hail_risk_code")),
-        "pluie_inondation": _risk_column_level(col("heavy_rain_risk_code")),
-        "vent": _risk_column_level(col("severe_wind_risk_code")),
-        "neige_verglas": max(
-            _risk_column_level(col("snow_risk_code")),
-            _risk_column_level(col("snow_stick_risk_code"), cap=3),
-        ),
-        # Relevé pour ne pas classer une journée d'été normale (30-33°C, très
-        # courant en France en août) au-dessus de Minime.
-        "chaleur": _threshold_level(max_temperature, (33.0, 36.0, 39.0, 42.0)),
-        "froid": _threshold_level_below(min_temperature, (-5.0, -10.0, -15.0, -20.0)),
+        "grele": grele_level,
+        # Cumul de pluie du jour (mm), pas un code instantané : le niveau à
+        # une heure donnée reflète le cumul depuis minuit jusqu'à cette
+        # heure-là (la frise progresse donc en escalier croissant sur la
+        # journée, comme un cumul réel).
+        "pluie_inondation": _threshold_level(day_precip_mm, PLUIE_THRESHOLDS_MM),
+        # Rafales (et non le vent moyen) : seuils fournis en km/h de rafale.
+        "vent": _threshold_level(max_gust, VENT_THRESHOLDS_KMH),
+        "neige": _threshold_level(day_snow_cm, NEIGE_THRESHOLDS_CM),
+        "verglas": _risk_column_level(col("snow_stick_risk_code"), cap=3),
+        "chaleur": _threshold_level(max_temperature, CHALEUR_THRESHOLDS),
+        "froid": _threshold_level_below(min_temperature, FROID_THRESHOLDS_BELOW),
         "brouillard": _threshold_level_below(min_visibility, (1.0, 0.5, 0.2, 0.1)),
         "feu": int(min(4, fire_score)),
     }
@@ -339,12 +436,35 @@ def build_department_risk(
     # dans ce pipeline, seulement des prévisions — on cumule donc depuis le
     # début de l'échéance disponible.
     running_precip = 0.0
+    # Cumuls du jour courant (mm de pluie, cm de neige) pour Pluie-inondation
+    # et Neige : remis à zéro à chaque changement de journée calendaire
+    # Europe/Paris, contrairement à ``running_precip`` ci-dessus (qui ne se
+    # réinitialise jamais, propre au proxy de sécheresse de Feu).
+    running_day_precip = 0.0
+    running_day_snow = 0.0
+    current_local_date: str | None = None
     hourly: list[dict[str, Any]] = []
     for step_index, valid_time in enumerate(series.times):
+        local_date = valid_time.astimezone(PARIS_TZ).date().isoformat()
+        if local_date != current_local_date:
+            running_day_precip = 0.0
+            running_day_snow = 0.0
+            current_local_date = local_date
+
         precip = series.column(step_index, "precipitation_mm")
         finite_precip = precip[np.isfinite(precip)] if precip.size else precip
         running_precip += float(np.max(finite_precip)) if finite_precip.size else 0.0
-        levels = hourly_hazard_levels(series, step_index, running_precip)
+
+        precip_repr = _nanpercentile_high(precip) if precip.size else float("nan")
+        running_day_precip += precip_repr if np.isfinite(precip_repr) else 0.0
+
+        snow_fresh = series.column(step_index, "snow_fresh_cm")
+        snow_repr = _nanpercentile_high(snow_fresh) if snow_fresh.size else float("nan")
+        running_day_snow += snow_repr if np.isfinite(snow_repr) else 0.0
+
+        levels = hourly_hazard_levels(
+            series, step_index, running_precip, running_day_precip, running_day_snow
+        )
         hourly.append(
             {
                 "time": valid_time.astimezone(timezone.utc)
@@ -467,10 +587,7 @@ def build_risques(
             "base_url": base_url,
         },
         "hazards": HAZARD_LABELS,
-        "levels": {
-            str(level): {"label": LEVEL_LABELS[level], "color": LEVEL_COLORS[level]}
-            for level in range(5)
-        },
+        "hazard_levels": hazard_levels_manifest(),
         "fire_disclaimer": FIRE_DISCLAIMER,
         "departments": departments,
     }

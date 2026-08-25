@@ -2,8 +2,8 @@
 /**
  * Plugin Name: Carte de Vigilance HARMONIE (risques)
  * Plugin URI: https://github.com/alertesmeteo-hub/risques
- * Description: Carte de risques météo non officielle (9 aléas, 5 niveaux, J/J+1/J+2) dérivée du modèle HARMONIE, avec recherche de commune, géolocalisation et frises horaires.
- * Version: 1.5.0
+ * Description: Carte de risques météo non officielle (10 aléas, échelle propre à chaque aléa, J/J+1/J+2) dérivée du modèle HARMONIE, avec recherche de commune, géolocalisation et frises horaires.
+ * Version: 2.0.0
  * Author: Alertes Météo Hub
  * Requires at least: 5.8
  * Requires PHP: 7.4
@@ -14,7 +14,7 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-define('HRW_VERSION', '1.5.0');
+define('HRW_VERSION', '2.0.0');
 define('HRW_RELEASE_DATE', '2026-08-25');
 define('HRW_OPTION_BASE_URL', 'hrw_risques_data_base_url');
 define(
@@ -120,7 +120,7 @@ function hrw_render_admin_help_page() {
     ?>
     <div class="wrap">
         <h1>Shortcodes Vigilance HARMONIE</h1>
-        <p><code>[harmonie_risques]</code> : carte de vigilance complète (9 aléas, J/J+1/J+2, recherche, frises).</p>
+        <p><code>[harmonie_risques]</code> : carte de vigilance complète (10 aléas, J/J+1/J+2, recherche, frises).</p>
         <p><code>[harmonie_risques departement="75" alea="orages"]</code> : ouvre directement sur un département et un aléa donnés.</p>
         <p>L’aléa <strong>Feu</strong> est un indice non officiel (cocktail météo), affiché avec un avertissement systématique — il ne remplace pas Météo des forêts.</p>
         <p>Voir <a href="<?php echo esc_url(admin_url('options-general.php?page=harmonie-risques')); ?>">Réglages</a> pour l’adresse du dossier de données.</p>
@@ -161,7 +161,7 @@ function hrw_department_code($value) {
 
 function hrw_hazard_code($value) {
     $allowed = array(
-        'orages', 'grele', 'pluie_inondation', 'vent', 'neige_verglas',
+        'orages', 'grele', 'pluie_inondation', 'vent', 'neige', 'verglas',
         'chaleur', 'froid', 'brouillard', 'feu',
     );
     $code = strtolower(trim((string) $value));
