@@ -378,6 +378,13 @@
             return scale ? Object.keys(scale).length - 1 : 4;
         }
 
+        // « X/N » à côté du libellé : les échelles n'ont plus toutes le
+        // même nombre de paliers (4 à 8 selon l'aléa), utile pour situer un
+        // niveau sans avoir la légende sous les yeux.
+        function levelFraction(hazard, level) {
+            return level + '/' + maxLevelFor(hazard);
+        }
+
         function hazardLabel(hazard) {
             return (manifest && manifest.hazards && manifest.hazards[hazard]) || hazard;
         }
@@ -536,7 +543,7 @@
                 var levelSpan = document.createElement('span');
                 levelSpan.className = 'hrw-hazard-level';
                 levelSpan.style.backgroundColor = info.color;
-                levelSpan.textContent = info.label;
+                levelSpan.textContent = info.label + ' (' + levelFraction(hazard, level) + ')';
                 cell.appendChild(name2);
                 cell.appendChild(document.createElement('br'));
                 cell.appendChild(levelSpan);
@@ -607,7 +614,7 @@
                 if (isClosing) {
                     cell.setAttribute('data-hrw-day-boundary', '1');
                 }
-                cell.title = formatter.format(localDate) + ' — ' + hazardLabel(detailHazard) + ' : ' + info.label;
+                cell.title = formatter.format(localDate) + ' — ' + hazardLabel(detailHazard) + ' : ' + info.label + ' (' + levelFraction(detailHazard, level) + ')';
                 friseTrack.appendChild(cell);
 
                 if (friseLabels) {
@@ -659,7 +666,7 @@
             var chip = document.createElement('div');
             chip.className = 'hrw-tooltip-chip';
             chip.style.backgroundColor = info.color;
-            chip.textContent = hazardLabel(currentHazard) + ' — ' + info.label;
+            chip.textContent = hazardLabel(currentHazard) + ' — ' + info.label + ' (' + levelFraction(currentHazard, level) + ')';
             tooltip.appendChild(chip);
 
             var hourlyAll = department.hourly || [];
@@ -677,17 +684,30 @@
                 });
                 tooltip.appendChild(mini);
 
-                // Peu de place dans l'info-bulle : seulement 3-4 repères
-                // (premher, dernier, quelques intermédiaires) plutôt que
-                // toutes les 3h comme sur la grande frise.
+                // Repères positionnés en absolu (premier, milieu, dernier)
+                // plutôt qu'une case par heure en flex : dans une info-bulle
+                // de 180px avec 20-30 heures, une case flex par heure était
+                // trop étroite pour son propre texte, qui débordait sur les
+                // voisines et devenait illisible (ex. « 22h » × 2 superposés
+                // rendus comme « 2222h »).
                 var miniLabels = document.createElement('div');
                 miniLabels.className = 'hrw-tooltip-frise-labels';
-                var miniTickEvery = Math.max(1, Math.ceil(dayHours.length / 4));
-                dayHours.forEach(function (entry, index) {
+                var lastIdx = dayHours.length - 1;
+                var tickIndexes = lastIdx > 0
+                    ? Array.from(new Set([0, Math.round(lastIdx / 2), lastIdx]))
+                    : [0];
+                tickIndexes.forEach(function (idx) {
                     var tick = document.createElement('span');
-                    var isLast = index === dayHours.length - 1;
-                    if (index === 0 || isLast || index % miniTickEvery === 0) {
-                        tick.textContent = localHourOf(new Date(entry.time)) + 'h';
+                    tick.className = 'hrw-tooltip-frise-tick-abs';
+                    tick.textContent = localHourOf(new Date(dayHours[idx].time)) + 'h';
+                    var pct = lastIdx > 0 ? (idx / lastIdx) * 100 : 50;
+                    tick.style.left = pct + '%';
+                    if (idx === 0) {
+                        tick.style.transform = 'translateX(0)';
+                    } else if (idx === lastIdx) {
+                        tick.style.transform = 'translateX(-100%)';
+                    } else {
+                        tick.style.transform = 'translateX(-50%)';
                     }
                     miniLabels.appendChild(tick);
                 });

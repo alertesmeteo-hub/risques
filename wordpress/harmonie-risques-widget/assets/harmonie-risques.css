@@ -354,15 +354,15 @@
 }
 
 .hrw-tooltip-frise-labels {
-    display: flex;
+    position: relative;
     width: 180px;
+    height: 13px;
     margin-top: 2px;
 }
 
-.hrw-tooltip-frise-labels span {
-    flex: 1 1 0;
-    min-width: 1px;
-    text-align: center;
+.hrw-tooltip-frise-tick-abs {
+    position: absolute;
+    top: 0;
     font-size: .62rem;
     color: var(--hrw-muted);
     white-space: nowrap;

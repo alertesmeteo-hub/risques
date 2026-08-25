@@ -43,7 +43,7 @@ except ImportError:  # pragma: no cover - Python < 3.9 non pris en charge ici
 
 
 LOGGER = logging.getLogger("risques")
-PIPELINE_VERSION = "2.0.1"
+PIPELINE_VERSION = "2.1.0"
 PARIS_TZ = ZoneInfo("Europe/Paris") if ZoneInfo is not None else timezone.utc
 
 DEFAULT_HARMONIE_BASE_URL = (
@@ -51,27 +51,31 @@ DEFAULT_HARMONIE_BASE_URL = (
 )
 
 HAZARDS = (
+    "vent",
+    "pluie_inondation",
     "orages",
     "grele",
-    "pluie_inondation",
-    "vent",
-    "neige",
-    "verglas",
     "chaleur",
     "froid",
+    "neige",
+    "verglas",
     "brouillard",
     "feu",
 )
 
+# L'ordre d'affichage (onglets, grille de détail) suit l'ordre d'insertion
+# de ce dict, propagé tel quel dans le JSON (``manifest.hazards``) puis lu
+# côté widget via ``Object.keys()`` — le réordonner ici suffit à réordonner
+# toute l'interface, aucun changement JS n'est nécessaire.
 HAZARD_LABELS = {
+    "vent": "Vent",
+    "pluie_inondation": "Pluie-inondation",
     "orages": "Orages",
     "grele": "Grêle",
-    "pluie_inondation": "Pluie-inondation",
-    "vent": "Vent",
-    "neige": "Neige",
-    "verglas": "Verglas",
     "chaleur": "Chaleur",
     "froid": "Froid",
+    "neige": "Neige",
+    "verglas": "Verglas",
     "brouillard": "Brouillard",
     "feu": "Feu",
 }
@@ -98,14 +102,13 @@ _RAMP_4 = ["#e8f5e9", "#fff59d", "#ffb74d", "#ce93d8"]
 _TIERS_7 = ["Faible", "Modéré", "Marqué", "Fort", "Très fort", "Intense", "Extrême"]
 
 HAZARD_LEVELS: dict[str, list[str]] = {
+    # Aléas à seuils numériques (7 paliers + Nul).
+    "vent": ["Nul", *_TIERS_7],
+    "pluie_inondation": ["Nul", *_TIERS_7],
     # Aléas à code de risque HARMONIE (0-4, passthrough) : mêmes libellés
     # génériques pour les deux, dans l'esprit fourni pour les orages.
     "orages": ["Nul", "Faible / Modéré", "Marqué / Fort", "Intense / Violent", "Extrême"],
     "grele": ["Nul", "Faible / Modéré", "Marqué / Fort", "Intense / Violent", "Extrême"],
-    "brouillard": ["Nul", "Faible", "Modéré", "Fort", "Sévère"],
-    # Aléas à seuils numériques (7 paliers + Nul).
-    "pluie_inondation": ["Nul", *_TIERS_7],
-    "vent": ["Nul", *_TIERS_7],
     "chaleur": ["Nul", *_TIERS_7],
     "froid": ["Nul", *_TIERS_7],
     "neige": ["Nul", *_TIERS_7],
@@ -116,6 +119,7 @@ HAZARD_LEVELS: dict[str, list[str]] = {
         "Risque de pluie verglaçante",
         "Pluie verglaçante durable",
     ],
+    "brouillard": ["Nul", "Faible", "Modéré", "Fort", "Sévère"],
     # Feu : inchangé, 0-4 générique.
     "feu": ["Nul", "Faible", "Modéré", "Fort", "Sévère"],
 }
