@@ -27,7 +27,7 @@ import json
 import logging
 import sys
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -41,7 +41,7 @@ except ImportError:  # pragma: no cover - Python < 3.9 non pris en charge ici
 
 
 LOGGER = logging.getLogger("risques")
-PIPELINE_VERSION = "1.1.0"
+PIPELINE_VERSION = "1.5.0"
 PARIS_TZ = ZoneInfo("Europe/Paris") if ZoneInfo is not None else timezone.utc
 
 DEFAULT_HARMONIE_BASE_URL = (
@@ -73,15 +73,19 @@ HAZARD_LABELS = {
 }
 
 LEVEL_LABELS = {0: "Minime", 1: "Faible", 2: "Modéré", 3: "Fort", 4: "Sévère"}
-# Palette proche des couleurs officielles de vigilance météo (vert / jaune /
-# orange / rouge), avec un vert clair supplémentaire pour le palier « Minime »
-# qui n'existe pas dans l'échelle à 4 couleurs habituelle.
+# Palette pastel/claire (fond blanc), dans l'esprit vert/jaune/orange/rouge
+# de la vigilance météo habituelle mais adoucie pour rester lisible sur
+# blanc — la distinction entre niveaux repose sur les bordures de
+# département (toujours foncées), pas sur un contraste de fond agressif.
+# Le niveau 4 (Sévère/extrême) est en violet plutôt qu'en rouge : au-delà
+# du rouge, c'est la convention usuelle pour marquer qu'on sort de l'échelle
+# habituelle vert/jaune/orange/rouge.
 LEVEL_COLORS = {
-    0: "#8bc34a",
-    1: "#31a100",
-    2: "#ffcc00",
-    3: "#ff8300",
-    4: "#cc1f16",
+    0: "#e8f5e9",
+    1: "#a5d6a7",
+    2: "#fff59d",
+    3: "#ffcc80",
+    4: "#ce93d8",
 }
 
 FIRE_DISCLAIMER = (
@@ -204,21 +208,32 @@ def load_department_series(
     return DepartmentSeries(code=code, times=times, columns=columns, forecast=forecast)
 
 
-def _nanmax(values: np.ndarray) -> float:
+def _nanpercentile_high(values: np.ndarray, percentile: float = 90.0) -> float:
+    """Perçentile haut plutôt que le max strict : un département compte des
+    dizaines à centaines de points HARMONIE, et prendre le max fait qu'UNE
+    seule commune en pointe fait passer tout le département au niveau
+    maximal, pour toute la journée (constaté en production : 58% des
+    départements en Orages « Sévère » le même jour). Le 90e centile reste
+    sensible à un risque réellement étendu, sans être piloté par un seul
+    point isolé."""
+
     finite = values[np.isfinite(values)] if values.size else values
-    return float(np.max(finite)) if finite.size else float("nan")
+    return float(np.percentile(finite, percentile)) if finite.size else float("nan")
 
 
-def _nanmin(values: np.ndarray) -> float:
+def _nanpercentile_low(values: np.ndarray, percentile: float = 10.0) -> float:
+    """Symétrique de ``_nanpercentile_high`` pour les grandeurs qui
+    s'aggravent quand elles diminuent (visibilité, température, humidité)."""
+
     finite = values[np.isfinite(values)] if values.size else values
-    return float(np.min(finite)) if finite.size else float("nan")
+    return float(np.percentile(finite, percentile)) if finite.size else float("nan")
 
 
 def _risk_column_level(values: np.ndarray, cap: int = 4) -> int:
     finite = values[np.isfinite(values)] if values.size else values
     if not finite.size:
         return 0
-    return int(min(cap, max(0, round(float(np.max(finite))))))
+    return int(min(cap, max(0, round(_nanpercentile_high(values)))))
 
 
 def _threshold_level(value: float, thresholds: tuple[float, float, float, float]) -> int:
@@ -259,26 +274,40 @@ def hourly_hazard_levels(
     wind_speed = col("wind_speed_kmh")
     visibility = col("visibility_km")
 
-    max_temperature = _nanmax(temperature)
-    min_temperature = _nanmin(temperature)
-    min_humidity = _nanmin(humidity)
-    max_wind = _nanmax(wind_speed)
-    min_visibility = _nanmin(visibility)
+    # Perçentiles plutôt que max/min strict : même correction que pour les
+    # aléas à code de risque (cf. _nanpercentile_high) — une seule commune
+    # ne doit pas suffire à faire basculer tout le département.
+    max_temperature = _nanpercentile_high(temperature)
+    min_temperature = _nanpercentile_low(temperature)
+    min_humidity = _nanpercentile_low(humidity)
+    max_wind = _nanpercentile_high(wind_speed)
+    min_visibility = _nanpercentile_low(visibility)
 
+    # Cocktail feu recalibré pour ne pas s'allumer sur une journée d'été
+    # ordinaire (ex. 30°C/40% d'humidité en France ne constitue pas un
+    # risque en soi) : il faut une chaleur ET une sécheresse de l'air
+    # réellement marquées pour que le score grimpe.
     fire_score = 0
     if np.isfinite(max_temperature):
-        if max_temperature >= 32:
+        if max_temperature >= 35:
             fire_score += 2
-        elif max_temperature >= 27:
+        elif max_temperature >= 30:
             fire_score += 1
     if np.isfinite(min_humidity):
-        if min_humidity <= 30:
+        if min_humidity <= 25:
             fire_score += 2
-        elif min_humidity <= 45:
+        elif min_humidity <= 35:
             fire_score += 1
-    if np.isfinite(max_wind) and max_wind >= 40:
+    if np.isfinite(max_wind) and max_wind >= 35:
         fire_score += 1
-    if cumulative_precip_mm < 1.0:
+    # Le cumul de précipitations part de 0 au début de la série disponible
+    # (pas d'observations passées dans ce pipeline) : sur le premier jour,
+    # « moins de 1 mm cumulé » est donc presque toujours vrai par simple
+    # effet de démarrage, pas parce qu'il fait réellement sec — constaté en
+    # production (point +1 quasi systématique en J0). On n'accorde ce point
+    # qu'à partir d'une trentaine d'heures de série, quand le cumul reflète
+    # un vrai créneau sans pluie plutôt qu'un compteur qui vient de démarrer.
+    if step_index >= 24 and cumulative_precip_mm < 1.0:
         fire_score += 1
 
     return {
@@ -290,15 +319,17 @@ def hourly_hazard_levels(
             _risk_column_level(col("snow_risk_code")),
             _risk_column_level(col("snow_stick_risk_code"), cap=3),
         ),
-        "chaleur": _threshold_level(max_temperature, (30.0, 33.0, 36.0, 39.0)),
-        "froid": _threshold_level_below(min_temperature, (-5.0, -10.0, -15.0, -18.0)),
-        "brouillard": _threshold_level_below(min_visibility, (1.0, 0.5, 0.2, 0.05)),
+        # Relevé pour ne pas classer une journée d'été normale (30-33°C, très
+        # courant en France en août) au-dessus de Minime.
+        "chaleur": _threshold_level(max_temperature, (33.0, 36.0, 39.0, 42.0)),
+        "froid": _threshold_level_below(min_temperature, (-5.0, -10.0, -15.0, -20.0)),
+        "brouillard": _threshold_level_below(min_visibility, (1.0, 0.5, 0.2, 0.1)),
         "feu": int(min(4, fire_score)),
     }
 
 
 def build_department_risk(
-    series: DepartmentSeries, day_count: int
+    series: DepartmentSeries, day_count: int, today: date
 ) -> dict[str, Any] | None:
     if not series.times:
         return None
@@ -334,16 +365,26 @@ def build_department_risk(
         )
         days.setdefault(local_date, []).append(entry)
 
-    ordered_dates = sorted(days)[:day_count]
+    # J0 doit toujours être la date du jour (Europe/Paris), même si le run
+    # HARMONIE source est en retard et ne couvre pas encore (ou plus) la
+    # journée en cours : un département sans données pour une date cible
+    # reçoit simplement des niveaux à 0 plutôt que de décaler tout l'axe
+    # J/J+1/J+2. ``today`` est calculé une seule fois pour tout le run (et
+    # non par département) pour que les 96 départements du même run
+    # partagent exactement la même date J0, même si le traitement chevauche
+    # minuit.
+    ordered_dates = [
+        (today + timedelta(days=offset)).isoformat() for offset in range(day_count)
+    ]
     daily: list[dict[str, Any]] = []
-    for date in ordered_dates:
-        entries = days[date]
+    for date_str in ordered_dates:
+        entries = days.get(date_str, [])
         day_levels: dict[str, int] = {}
         for hazard in HAZARDS:
             day_levels[hazard] = max(
                 (entry["hazards"][hazard] for entry in entries), default=0
             )
-        daily.append({"date": date, "hazards": day_levels})
+        daily.append({"date": date_str, "hazards": day_levels})
 
     return {"daily": daily, "hourly": hourly}
 
@@ -381,6 +422,7 @@ def build_risques(
     session = requests.Session()
     session.headers["User-Agent"] = "alertesmeteo-hub-risques/1.0"
 
+    today = datetime.now(PARIS_TZ).date()
     departments: dict[str, Any] = {}
     run_time: datetime | None = None
     missing = 0
@@ -389,7 +431,7 @@ def build_risques(
         if series is None:
             missing += 1
             continue
-        risk = build_department_risk(series, day_count)
+        risk = build_department_risk(series, day_count, today)
         if risk is None:
             missing += 1
             continue

@@ -6,17 +6,89 @@
     var IDF_CODES = ['75', '77', '78', '91', '92', '93', '94', '95'];
     var ICON_MIN_LEVEL = 2;
 
-    var HAZARD_ICONS = {
-        orages: '⛈️',
-        grele: '🧊',
-        pluie_inondation: '🌧️',
-        vent: '💨',
-        neige_verglas: '❄️',
-        chaleur: '🔥',
-        froid: '🥶',
-        brouillard: '🌫️',
-        feu: '🔥'
+    // Icônes vectorielles épurées (monochromes, viewBox 24x24, dessinées à
+    // la main — pas d'emoji, ni de dépendance externe). Chaque primitive
+    // est rejouée à la fois en HTML (onglets, détail) et en SVG (badges sur
+    // la carte) à partir de la même définition, pour éviter toute
+    // divergence visuelle entre les deux usages.
+    var ICONS = {
+        orages: [
+            { tag: 'path', d: 'M13 2 3 14h6l-1 8 10-12h-6l1-8z', fill: 'currentColor' }
+        ],
+        grele: [
+            { tag: 'circle', cx: 7, cy: 9, r: 2.6, fill: 'currentColor' },
+            { tag: 'circle', cx: 15, cy: 7, r: 2.1, fill: 'currentColor' },
+            { tag: 'circle', cx: 11.5, cy: 15.5, r: 3, fill: 'currentColor' }
+        ],
+        pluie_inondation: [
+            { tag: 'circle', cx: 8, cy: 11, r: 3.4, fill: 'currentColor' },
+            { tag: 'circle', cx: 13, cy: 8.5, r: 4.4, fill: 'currentColor' },
+            { tag: 'circle', cx: 17.2, cy: 11, r: 3.4, fill: 'currentColor' },
+            { tag: 'rect', x: 5.4, y: 11, width: 13.6, height: 5.2, rx: 2.6, fill: 'currentColor' },
+            { tag: 'path', d: 'M8 19.5l1.2 3h-2.4z', fill: 'currentColor' },
+            { tag: 'path', d: 'M13 19.5l1.2 3h-2.4z', fill: 'currentColor' },
+            { tag: 'path', d: 'M18 19.5l1.2 3h-2.4z', fill: 'currentColor' }
+        ],
+        vent: [
+            { tag: 'path', d: 'M3 8h10.5a3 3 0 1 0-2.6-4.6', stroke: 'currentColor', 'stroke-width': 2.2, 'stroke-linecap': 'round', fill: 'none' },
+            { tag: 'path', d: 'M3 13h14.5a3 3 0 1 1-2.6 4.6', stroke: 'currentColor', 'stroke-width': 2.2, 'stroke-linecap': 'round', fill: 'none' },
+            { tag: 'path', d: 'M3 18h9', stroke: 'currentColor', 'stroke-width': 2.2, 'stroke-linecap': 'round', fill: 'none' }
+        ],
+        neige_verglas: [
+            { tag: 'line', x1: 12, y1: 2, x2: 12, y2: 22, stroke: 'currentColor', 'stroke-width': 2, 'stroke-linecap': 'round' },
+            { tag: 'line', x1: 4.2, y1: 7, x2: 19.8, y2: 17, stroke: 'currentColor', 'stroke-width': 2, 'stroke-linecap': 'round' },
+            { tag: 'line', x1: 19.8, y1: 7, x2: 4.2, y2: 17, stroke: 'currentColor', 'stroke-width': 2, 'stroke-linecap': 'round' }
+        ],
+        chaleur: [
+            { tag: 'circle', cx: 12, cy: 12, r: 4.2, fill: 'currentColor' },
+            { tag: 'line', x1: 12, y1: 1.5, x2: 12, y2: 4.5, stroke: 'currentColor', 'stroke-width': 2, 'stroke-linecap': 'round' },
+            { tag: 'line', x1: 12, y1: 19.5, x2: 12, y2: 22.5, stroke: 'currentColor', 'stroke-width': 2, 'stroke-linecap': 'round' },
+            { tag: 'line', x1: 1.5, y1: 12, x2: 4.5, y2: 12, stroke: 'currentColor', 'stroke-width': 2, 'stroke-linecap': 'round' },
+            { tag: 'line', x1: 19.5, y1: 12, x2: 22.5, y2: 12, stroke: 'currentColor', 'stroke-width': 2, 'stroke-linecap': 'round' },
+            { tag: 'line', x1: 4.6, y1: 4.6, x2: 6.7, y2: 6.7, stroke: 'currentColor', 'stroke-width': 2, 'stroke-linecap': 'round' },
+            { tag: 'line', x1: 17.3, y1: 17.3, x2: 19.4, y2: 19.4, stroke: 'currentColor', 'stroke-width': 2, 'stroke-linecap': 'round' },
+            { tag: 'line', x1: 4.6, y1: 19.4, x2: 6.7, y2: 17.3, stroke: 'currentColor', 'stroke-width': 2, 'stroke-linecap': 'round' },
+            { tag: 'line', x1: 17.3, y1: 6.7, x2: 19.4, y2: 4.6, stroke: 'currentColor', 'stroke-width': 2, 'stroke-linecap': 'round' }
+        ],
+        froid: [
+            { tag: 'path', d: 'M12 3a2 2 0 0 0-2 2v8.1a4.2 4.2 0 1 0 4 0V5a2 2 0 0 0-2-2z', stroke: 'currentColor', 'stroke-width': 1.8, fill: 'none' },
+            { tag: 'circle', cx: 12, cy: 18, r: 2.4, fill: 'currentColor' }
+        ],
+        brouillard: [
+            { tag: 'line', x1: 4, y1: 7, x2: 20, y2: 7, stroke: 'currentColor', 'stroke-width': 2.2, 'stroke-linecap': 'round' },
+            { tag: 'line', x1: 2.5, y1: 12, x2: 21.5, y2: 12, stroke: 'currentColor', 'stroke-width': 2.2, 'stroke-linecap': 'round' },
+            { tag: 'line', x1: 4, y1: 17, x2: 20, y2: 17, stroke: 'currentColor', 'stroke-width': 2.2, 'stroke-linecap': 'round' }
+        ],
+        feu: [
+            { tag: 'path', d: 'M12 2c1.6 2.8 1 4.6-.3 6.4-1.1 1.5-2.4 3-2.4 5.3a3.7 3.7 0 0 0 7.4 0c0-1.4-.5-2.3-1-3.1.2 1.2-.4 2-.4 2 .5-2.6-.9-4.4-1.7-5.6.2 1-.3 1.6-.3 1.6.4-2.6-.6-4.4-1.3-6.6z', fill: 'currentColor' },
+            { tag: 'path', d: 'M11.2 22c-2.6 0-4.6-1.8-4.6-4.3 0-1.6.8-2.8 1.6-3.7-.2 1.3.3 2.1.3 2.1-.3-1.8.7-3 1.5-3.8-.1 1 .2 1.6.2 1.6 0-1.6 1-2.6 1-2.6-.6 1.8.2 3 .2 3 .7.4 1.2 1.2 1.2 2.2 0 1.6-1 2.5-1.4 3.5.6-.2 1.1-.6 1.4-1.1-.1 1.8-1.5 3.1-3.4 3.1z', fill: 'currentColor', opacity: '.55' }
+        ]
     };
+
+    function createSvgElement(tag, attrs) {
+        var node = document.createElementNS(SVG_NS, tag);
+        Object.keys(attrs || {}).forEach(function (key) {
+            node.setAttribute(key, attrs[key]);
+        });
+        return node;
+    }
+
+    function appendIconPrimitives(container, name) {
+        (ICONS[name] || []).forEach(function (primitive) {
+            var attrs = {};
+            Object.keys(primitive).forEach(function (key) {
+                if (key !== 'tag') { attrs[key] = primitive[key]; }
+            });
+            container.appendChild(createSvgElement(primitive.tag, attrs));
+        });
+    }
+
+    function buildIconNode(name, className) {
+        var svg = createSvgElement('svg', { viewBox: '0 0 24 24', 'aria-hidden': 'true', focusable: 'false' });
+        svg.setAttribute('class', className);
+        appendIconPrimitives(svg, name);
+        return svg;
+    }
 
     var ADVICE = {
         orages: 'Des orages sont possibles dans les prochaines heures. Consultez régulièrement les prévisions et restez attentifs.',
@@ -238,6 +310,7 @@
         var fireDisclaimer = app.querySelector('[data-hrw-fire-disclaimer]');
         var mapSvg = app.querySelector('[data-hrw-map]');
         var insetSvg = app.querySelector('[data-hrw-inset-map]');
+        var mapWrap = app.querySelector('.hrw-map-wrap');
         var mapLoading = app.querySelector('[data-hrw-map-loading]');
         var legend = app.querySelector('[data-hrw-legend]');
         var detailPlaceholder = app.querySelector('[data-hrw-detail-placeholder]');
@@ -274,9 +347,17 @@
         }
 
         function localHourOf(date) {
-            return Number(new Intl.DateTimeFormat('fr-FR', {
+            // formatToParts() plutôt que format() : certaines données ICU
+            // ajoutent un suffixe d'unité (« 3 h ») au format heure-seule
+            // en fr-FR, ce qui casse Number() sur la chaîne complète —
+            // confirmé empiriquement (les ticks affichaient « NaNh »).
+            // Lire directement la part de type "hour" évite ce piège quel
+            // que soit le comportement local du moteur.
+            var parts = new Intl.DateTimeFormat('en-GB', {
                 hour: '2-digit', hourCycle: 'h23', timeZone: timezone
-            }).format(date));
+            }).formatToParts(date);
+            var hourPart = parts.filter(function (part) { return part.type === 'hour'; })[0];
+            return hourPart ? Number(hourPart.value) : 0;
         }
 
         function levelInfo(level) {
@@ -301,15 +382,16 @@
             Object.keys(mapEntries).forEach(function (code) {
                 var level = departmentLevel(code, currentHazard, currentDayIndex);
                 var color = levelInfo(level).color;
-                var iconChar = level >= ICON_MIN_LEVEL ? (HAZARD_ICONS[currentHazard] || '') : '';
+                var showIconForLevel = level >= ICON_MIN_LEVEL;
                 mapEntries[code].forEach(function (entry) {
                     entry.path.setAttribute('fill', color);
                     entry.path.classList.toggle('is-selected', code === selectedDepartment);
-                    if (iconChar && entry.showIcon) {
-                        entry.icon.textContent = iconChar;
-                        entry.icon.style.display = '';
+                    if (showIconForLevel && entry.showIcon) {
+                        entry.glyph.replaceChildren();
+                        appendIconPrimitives(entry.glyph, currentHazard);
+                        entry.iconGroup.style.display = '';
                     } else {
-                        entry.icon.style.display = 'none';
+                        entry.iconGroup.style.display = 'none';
                     }
                 });
             });
@@ -340,7 +422,8 @@
                 button.type = 'button';
                 button.className = 'hrw-tab';
                 button.dataset.hazard = hazard;
-                button.textContent = (HAZARD_ICONS[hazard] || '') + ' ' + manifest.hazards[hazard];
+                button.appendChild(buildIconNode(hazard, 'hrw-tab-icon'));
+                button.appendChild(document.createTextNode(manifest.hazards[hazard]));
                 button.classList.toggle('is-active', hazard === currentHazard);
                 button.addEventListener('click', function () {
                     setHazard(hazard);
@@ -430,7 +513,8 @@
                 cell.classList.toggle('is-active', hazard === detailHazard);
                 var name2 = document.createElement('span');
                 name2.className = 'hrw-hazard-name';
-                name2.textContent = (HAZARD_ICONS[hazard] || '') + ' ' + manifest.hazards[hazard];
+                name2.appendChild(buildIconNode(hazard, 'hrw-hazard-icon'));
+                name2.appendChild(document.createTextNode(manifest.hazards[hazard]));
                 var levelSpan = document.createElement('span');
                 levelSpan.className = 'hrw-hazard-level';
                 levelSpan.style.backgroundColor = info.color;
@@ -469,13 +553,24 @@
             var dayHours = hourlyAll.filter(function (entry) {
                 return zonedDateKey(entry.time, timezone) === dayEntry.date;
             });
-            if (!dayHours.length) { return; }
+            if (!dayHours.length) {
+                if (adviceText) {
+                    adviceText.textContent = 'Données HARMONIE indisponibles pour cette journée.';
+                }
+                return;
+            }
 
             // Tick de clôture « 0h » du lendemain, pour boucler l'affichage
             // 0h → 21h → 0h comme sur la maquette fournie.
             var lastIndex = hourlyAll.indexOf(dayHours[dayHours.length - 1]);
             var closingEntry = lastIndex >= 0 ? hourlyAll[lastIndex + 1] : null;
             var cells = closingEntry ? dayHours.concat([closingEntry]) : dayHours;
+
+            // Espacement des repères d'heure calculé sur le nombre réel de
+            // cellules plutôt que sur un pas supposé de 3h : reste correct
+            // quelle que soit la cadence réelle des données HARMONIE (1h,
+            // 3h…), et garantit toujours au moins quelques repères visibles.
+            var tickEvery = Math.max(1, Math.round(dayHours.length / 8));
 
             var formatter = hourFormatter();
             cells.forEach(function (entry, index) {
@@ -497,7 +592,7 @@
                     var tick = document.createElement('span');
                     tick.className = 'hrw-frise-tick';
                     var hour = isClosing ? 0 : localHourOf(localDate);
-                    if (isClosing || hour % 3 === 0) {
+                    if (isClosing || index === 0 || index % tickEvery === 0) {
                         tick.textContent = hour + 'h';
                     }
                     friseLabels.appendChild(tick);
@@ -507,7 +602,85 @@
             renderAdvice(dayEntry.hazards[detailHazard] || 0);
         }
 
-        function buildMapInto(svgEl, features, viewSize, padding, suppressIconCodes) {
+        // --- Info-bulle au survol d'un département (nom, niveau de l'aléa
+        // affiché, mini-frise de la journée sélectionnée) — indépendante du
+        // clic, qui ouvre lui le panneau de détail complet.
+        var tooltip = document.createElement('div');
+        tooltip.className = 'hrw-map-tooltip';
+        tooltip.hidden = true;
+        if (mapWrap) { mapWrap.appendChild(tooltip); }
+
+        function positionTooltip(anchorEl) {
+            if (!mapWrap) { return; }
+            var wrapRect = mapWrap.getBoundingClientRect();
+            var anchorRect = anchorEl.getBoundingClientRect();
+            var x = anchorRect.left + anchorRect.width / 2 - wrapRect.left;
+            var y = anchorRect.top - wrapRect.top;
+            tooltip.style.left = Math.max(8, Math.min(x, wrapRect.width - 8)) + 'px';
+            tooltip.style.top = Math.max(8, y) + 'px';
+        }
+
+        function showDeptTooltip(code, anchorEl) {
+            if (!manifest || !manifest.departments[code]) { return; }
+            var department = manifest.departments[code];
+            var dayEntry = department.daily[currentDayIndex];
+            if (!dayEntry) { return; }
+            var level = (dayEntry.hazards || {})[currentHazard] || 0;
+            var info = levelInfo(level);
+
+            tooltip.replaceChildren();
+            var title = document.createElement('div');
+            title.className = 'hrw-tooltip-title';
+            title.textContent = (namesByCode[code] || code) + ' (' + code + ')';
+            tooltip.appendChild(title);
+
+            var chip = document.createElement('div');
+            chip.className = 'hrw-tooltip-chip';
+            chip.style.backgroundColor = info.color;
+            chip.textContent = hazardLabel(currentHazard) + ' — ' + info.label;
+            tooltip.appendChild(chip);
+
+            var hourlyAll = department.hourly || [];
+            var dayHours = hourlyAll.filter(function (entry) {
+                return zonedDateKey(entry.time, timezone) === dayEntry.date;
+            });
+            if (dayHours.length) {
+                var mini = document.createElement('div');
+                mini.className = 'hrw-tooltip-frise';
+                dayHours.forEach(function (entry) {
+                    var hourLevel = (entry.hazards || {})[currentHazard] || 0;
+                    var segment = document.createElement('span');
+                    segment.style.backgroundColor = levelInfo(hourLevel).color;
+                    mini.appendChild(segment);
+                });
+                tooltip.appendChild(mini);
+
+                // Peu de place dans l'info-bulle : seulement 3-4 repères
+                // (premher, dernier, quelques intermédiaires) plutôt que
+                // toutes les 3h comme sur la grande frise.
+                var miniLabels = document.createElement('div');
+                miniLabels.className = 'hrw-tooltip-frise-labels';
+                var miniTickEvery = Math.max(1, Math.ceil(dayHours.length / 4));
+                dayHours.forEach(function (entry, index) {
+                    var tick = document.createElement('span');
+                    var isLast = index === dayHours.length - 1;
+                    if (index === 0 || isLast || index % miniTickEvery === 0) {
+                        tick.textContent = localHourOf(new Date(entry.time)) + 'h';
+                    }
+                    miniLabels.appendChild(tick);
+                });
+                tooltip.appendChild(miniLabels);
+            }
+
+            positionTooltip(anchorEl);
+            tooltip.hidden = false;
+        }
+
+        function hideDeptTooltip() {
+            tooltip.hidden = true;
+        }
+
+        function buildMapInto(svgEl, features, viewSize, padding, suppressIconCodes, iconRadius) {
             if (!svgEl || !features.length) { return; }
             var bounds = computeBoundsFromFeatures(features);
             var project = buildProjector(bounds, viewSize, padding);
@@ -532,23 +705,42 @@
                         selectDepartment(code);
                     }
                 });
+                path.addEventListener('mouseenter', function () { showDeptTooltip(code, path); });
+                path.addEventListener('mouseleave', hideDeptTooltip);
+                path.addEventListener('focus', function () { showDeptTooltip(code, path); });
+                path.addEventListener('blur', hideDeptTooltip);
                 svgEl.appendChild(path);
 
                 var ringPoints = largestExteriorRingPoints(feature.geometry, project);
                 var centroid = ringPoints.length ? polygonCentroid(ringPoints) : [0, 0];
-                var icon = document.createElementNS(SVG_NS, 'text');
-                icon.setAttribute('class', 'hrw-dept-icon');
-                icon.setAttribute('text-anchor', 'middle');
-                icon.setAttribute('dominant-baseline', 'central');
-                icon.setAttribute('x', centroid[0].toFixed(2));
-                icon.setAttribute('y', centroid[1].toFixed(2));
-                icon.style.display = 'none';
-                svgEl.appendChild(icon);
+
+                // Badge blanc + icône monochrome par-dessus, plutôt qu'un
+                // glyphe nu : reste lisible quelle que soit la couleur
+                // pastel du département en dessous.
+                var iconGroup = createSvgElement('g', { class: 'hrw-dept-icon-wrap' });
+                iconGroup.style.display = 'none';
+                var badge = createSvgElement('circle', {
+                    class: 'hrw-dept-icon-badge',
+                    cx: centroid[0].toFixed(2),
+                    cy: centroid[1].toFixed(2),
+                    r: iconRadius
+                });
+                var glyphScale = (iconRadius * 1.25) / 24;
+                var glyphX = centroid[0] - 12 * glyphScale;
+                var glyphY = centroid[1] - 12 * glyphScale;
+                var glyph = createSvgElement('g', {
+                    class: 'hrw-dept-icon',
+                    transform: 'translate(' + glyphX.toFixed(2) + ',' + glyphY.toFixed(2) + ') scale(' + glyphScale.toFixed(3) + ')'
+                });
+                iconGroup.appendChild(badge);
+                iconGroup.appendChild(glyph);
+                svgEl.appendChild(iconGroup);
 
                 if (!mapEntries[code]) { mapEntries[code] = []; }
                 mapEntries[code].push({
                     path: path,
-                    icon: icon,
+                    iconGroup: iconGroup,
+                    glyph: glyph,
                     showIcon: suppressIconCodes.indexOf(code) === -1
                 });
             });
@@ -556,13 +748,13 @@
 
         function buildMap(geojson) {
             var features = geojson.features || [];
-            buildMapInto(mapSvg, features, 1000, 12, IDF_CODES);
+            buildMapInto(mapSvg, features, 1000, 12, IDF_CODES, 13);
 
             var idfFeatures = features.filter(function (feature) {
                 var code = String((feature.properties || {}).code || '').toUpperCase();
                 return IDF_CODES.indexOf(code) !== -1;
             });
-            buildMapInto(insetSvg, idfFeatures, 300, 14, []);
+            buildMapInto(insetSvg, idfFeatures, 300, 14, [], 17);
 
             mapLoading.hidden = true;
         }
@@ -585,7 +777,7 @@
                     canvas.width = width;
                     canvas.height = height;
                     var context = canvas.getContext('2d');
-                    context.fillStyle = '#0d0f14';
+                    context.fillStyle = '#ffffff';
                     context.fillRect(0, 0, width, height);
                     context.drawImage(image, 0, 0, width, height);
                     URL.revokeObjectURL(url);

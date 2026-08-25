@@ -3,7 +3,7 @@
  * Plugin Name: Carte de Vigilance HARMONIE (risques)
  * Plugin URI: https://github.com/alertesmeteo-hub/risques
  * Description: Carte de risques météo non officielle (9 aléas, 5 niveaux, J/J+1/J+2) dérivée du modèle HARMONIE, avec recherche de commune, géolocalisation et frises horaires.
- * Version: 1.1.0
+ * Version: 1.5.0
  * Author: Alertes Météo Hub
  * Requires at least: 5.8
  * Requires PHP: 7.4
@@ -14,7 +14,7 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-define('HRW_VERSION', '1.1.0');
+define('HRW_VERSION', '1.5.0');
 define('HRW_RELEASE_DATE', '2026-08-25');
 define('HRW_OPTION_BASE_URL', 'hrw_risques_data_base_url');
 define(
@@ -243,11 +243,15 @@ function hrw_render_shortcode($atts) {
 
         <div class="hrw-body">
             <div class="hrw-map-wrap">
-                <svg class="hrw-map" data-hrw-map viewBox="0 0 1000 1000" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Carte des départements de France"></svg>
-                <div class="hrw-map-loading" data-hrw-map-loading>Chargement de la carte…</div>
-                <div class="hrw-map-inset-wrap">
-                    <svg class="hrw-inset-map" data-hrw-inset-map viewBox="0 0 300 300" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Carte détaillée de l’Île-de-France"></svg>
-                    <span class="hrw-inset-label">Île-de-France</span>
+                <div class="hrw-map-row">
+                    <div class="hrw-map-primary">
+                        <svg class="hrw-map" data-hrw-map viewBox="0 0 1000 1000" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Carte des départements de France"></svg>
+                        <div class="hrw-map-loading" data-hrw-map-loading>Chargement de la carte…</div>
+                    </div>
+                    <div class="hrw-map-inset-wrap">
+                        <svg class="hrw-inset-map" data-hrw-inset-map viewBox="0 0 300 300" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Carte détaillée de l’Île-de-France"></svg>
+                        <span class="hrw-inset-label">Île-de-France</span>
+                    </div>
                 </div>
                 <div class="hrw-legend" data-hrw-legend></div>
                 <div class="hrw-map-tools">
