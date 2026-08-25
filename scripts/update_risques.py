@@ -41,7 +41,7 @@ except ImportError:  # pragma: no cover - Python < 3.9 non pris en charge ici
 
 
 LOGGER = logging.getLogger("risques")
-PIPELINE_VERSION = "1.0.0"
+PIPELINE_VERSION = "1.1.0"
 PARIS_TZ = ZoneInfo("Europe/Paris") if ZoneInfo is not None else timezone.utc
 
 DEFAULT_HARMONIE_BASE_URL = (
@@ -73,12 +73,15 @@ HAZARD_LABELS = {
 }
 
 LEVEL_LABELS = {0: "Minime", 1: "Faible", 2: "Modéré", 3: "Fort", 4: "Sévère"}
+# Palette proche des couleurs officielles de vigilance météo (vert / jaune /
+# orange / rouge), avec un vert clair supplémentaire pour le palier « Minime »
+# qui n'existe pas dans l'échelle à 4 couleurs habituelle.
 LEVEL_COLORS = {
-    0: "#3a8f4a",
-    1: "#c7d92e",
-    2: "#f2a531",
-    3: "#e0402e",
-    4: "#7a1fa2",
+    0: "#8bc34a",
+    1: "#31a100",
+    2: "#ffcc00",
+    3: "#ff8300",
+    4: "#cc1f16",
 }
 
 FIRE_DISCLAIMER = (

@@ -3,6 +3,8 @@
 
     var COMMUNES_API = 'https://geo.api.gouv.fr/communes';
     var SVG_NS = 'http://www.w3.org/2000/svg';
+    var IDF_CODES = ['75', '77', '78', '91', '92', '93', '94', '95'];
+    var ICON_MIN_LEVEL = 2;
 
     var HAZARD_ICONS = {
         orages: '⛈️',
@@ -14,6 +16,18 @@
         froid: '🥶',
         brouillard: '🌫️',
         feu: '🔥'
+    };
+
+    var ADVICE = {
+        orages: 'Des orages sont possibles dans les prochaines heures. Consultez régulièrement les prévisions et restez attentifs.',
+        grele: 'Des chutes de grêle sont possibles. Mettez à l’abri les véhicules et objets fragiles si besoin.',
+        pluie_inondation: 'De fortes pluies peuvent provoquer des ruissellements ou des inondations locales. Évitez les sous-sols et les zones habituellement inondables.',
+        vent: 'Des rafales de vent sont attendues. Évitez les activités exposées et rangez les objets susceptibles de s’envoler.',
+        neige_verglas: 'Neige ou verglas peuvent rendre les routes glissantes. Adaptez votre conduite et anticipez vos déplacements.',
+        chaleur: 'Des températures élevées sont attendues. Hydratez-vous régulièrement et évitez les efforts aux heures les plus chaudes.',
+        froid: 'Des températures basses sont attendues. Protégez-vous du froid et limitez les expositions prolongées.',
+        brouillard: 'La visibilité peut être fortement réduite. Réduisez votre vitesse et augmentez les distances de sécurité.',
+        feu: 'Les conditions météo peuvent favoriser le développement d’un feu. Respectez les consignes locales et évitez tout départ de flamme.'
     };
 
     function whenReady(callback) {
@@ -42,11 +56,59 @@
         });
     }
 
+    // Certains thèmes (Avada/Fusion Builder) placent le shortcode dans une
+    // colonne bien plus étroite que la ligne qui la contient. On mesure les
+    // ancêtres réels au lieu de deviner une largeur fixe (même pattern que
+    // harmonie-knmi.js, déjà corrigé d'une boucle infinie rétréci/agrandi).
+    function clearWiden(card) {
+        card.style.width = '';
+        card.style.maxWidth = '';
+        card.style.marginLeft = '';
+        card.style.marginRight = '';
+    }
+
+    function widenToFitAncestor(card) {
+        if (!card) {
+            return;
+        }
+        if (window.innerWidth < 900) {
+            clearWiden(card);
+            return;
+        }
+        var parent = card.parentElement;
+        if (!parent) {
+            return;
+        }
+        clearWiden(card);
+        var parentWidth = parent.getBoundingClientRect().width;
+        var widest = parentWidth;
+        var el = parent.parentElement;
+        var hops = 0;
+        while (el && hops < 6) {
+            var rect = el.getBoundingClientRect();
+            if (rect.width > widest) {
+                widest = rect.width;
+            }
+            el = el.parentElement;
+            hops += 1;
+        }
+        var viewportLimit = (document.documentElement.clientWidth || window.innerWidth) - 4;
+        var target = Math.min(widest, 1700, viewportLimit);
+        if (target <= parentWidth + 24) {
+            return;
+        }
+        var offset = (target - parentWidth) / 2;
+        card.style.maxWidth = target + 'px';
+        card.style.width = target + 'px';
+        card.style.marginLeft = (-offset) + 'px';
+        card.style.marginRight = (-offset) + 'px';
+    }
+
     // --- Projection GeoJSON -> SVG (équirectangulaire, corrigée en cosinus
     // de latitude pour ne pas déformer la France) : même principe que la
     // projection du fond de carte HARMONIE, mais bornes calculées
     // dynamiquement depuis les contours eux-mêmes plutôt que codées en dur.
-    function computeBounds(geojson) {
+    function computeBoundsFromFeatures(features) {
         var west = Infinity, east = -Infinity, south = Infinity, north = -Infinity;
         function visit(coords, depth) {
             if (depth === 0) {
@@ -59,7 +121,7 @@
                 coords.forEach(function (item) { visit(item, depth - 1); });
             }
         }
-        geojson.features.forEach(function (feature) {
+        features.forEach(function (feature) {
             var geometry = feature.geometry;
             if (!geometry) { return; }
             var depth = geometry.type === 'Polygon' ? 2 : 3;
@@ -84,14 +146,18 @@
         };
     }
 
+    function projectRing(ring, project) {
+        return ring.map(function (point) { return project(point[0], point[1]); });
+    }
+
     function pathForGeometry(geometry, project) {
         var polygons = geometry.type === 'Polygon' ? [geometry.coordinates] : geometry.coordinates;
         var parts = [];
         polygons.forEach(function (polygon) {
             polygon.forEach(function (ring) {
+                var points = projectRing(ring, project);
                 var d = '';
-                ring.forEach(function (point, index) {
-                    var xy = project(point[0], point[1]);
+                points.forEach(function (xy, index) {
                     d += (index === 0 ? 'M' : 'L') + xy[0].toFixed(2) + ',' + xy[1].toFixed(2) + ' ';
                 });
                 d += 'Z ';
@@ -99,6 +165,60 @@
             });
         });
         return parts.join('');
+    }
+
+    // Centroïde (aire pondérée, formule du lacet) du plus grand contour
+    // extérieur de la géométrie : plus fiable qu'une simple moyenne de
+    // sommets pour placer une icône au centre visuel du département,
+    // y compris pour les formes concaves ou multi-parties.
+    function polygonSignedArea(points) {
+        var sum = 0;
+        for (var i = 0; i < points.length; i++) {
+            var a = points[i];
+            var b = points[(i + 1) % points.length];
+            sum += a[0] * b[1] - b[0] * a[1];
+        }
+        return sum / 2;
+    }
+
+    function polygonCentroid(points) {
+        var area = polygonSignedArea(points);
+        if (Math.abs(area) < 1e-9) {
+            var sx = 0, sy = 0;
+            points.forEach(function (p) { sx += p[0]; sy += p[1]; });
+            return [sx / points.length, sy / points.length];
+        }
+        var cx = 0, cy = 0;
+        for (var i = 0; i < points.length; i++) {
+            var a = points[i];
+            var b = points[(i + 1) % points.length];
+            var cross = a[0] * b[1] - b[0] * a[1];
+            cx += (a[0] + b[0]) * cross;
+            cy += (a[1] + b[1]) * cross;
+        }
+        return [cx / (6 * area), cy / (6 * area)];
+    }
+
+    function largestExteriorRingPoints(geometry, project) {
+        var polygons = geometry.type === 'Polygon' ? [geometry.coordinates] : geometry.coordinates;
+        var best = null;
+        var bestArea = -1;
+        polygons.forEach(function (polygon) {
+            if (!polygon.length) { return; }
+            var points = projectRing(polygon[0], project);
+            var area = Math.abs(polygonSignedArea(points));
+            if (area > bestArea) {
+                bestArea = area;
+                best = points;
+            }
+        });
+        return best || [];
+    }
+
+    function zonedDateKey(iso, tz) {
+        return new Intl.DateTimeFormat('en-CA', {
+            timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit'
+        }).format(new Date(iso));
     }
 
     function initApp(app) {
@@ -117,6 +237,7 @@
         var dayTabs = app.querySelector('[data-hrw-day-tabs]');
         var fireDisclaimer = app.querySelector('[data-hrw-fire-disclaimer]');
         var mapSvg = app.querySelector('[data-hrw-map]');
+        var insetSvg = app.querySelector('[data-hrw-inset-map]');
         var mapLoading = app.querySelector('[data-hrw-map-loading]');
         var legend = app.querySelector('[data-hrw-legend]');
         var detailPlaceholder = app.querySelector('[data-hrw-detail-placeholder]');
@@ -125,11 +246,13 @@
         var detailGrid = app.querySelector('[data-hrw-detail-grid]');
         var friseHazardLabel = app.querySelector('[data-hrw-frise-hazard]');
         var friseTrack = app.querySelector('[data-hrw-frise-track]');
+        var friseLabels = app.querySelector('[data-hrw-frise-labels]');
+        var adviceText = app.querySelector('[data-hrw-advice-text]');
         var captureButton = app.querySelector('[data-hrw-capture]');
         var copyButton = app.querySelector('[data-hrw-copy]');
 
         var manifest = null;
-        var pathsByCode = {};
+        var mapEntries = {};
         var namesByCode = {};
         var currentHazard = defaultHazard;
         var currentDayIndex = 0;
@@ -148,6 +271,12 @@
             return new Intl.DateTimeFormat('fr-FR', {
                 hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZone: timezone
             });
+        }
+
+        function localHourOf(date) {
+            return Number(new Intl.DateTimeFormat('fr-FR', {
+                hour: '2-digit', hourCycle: 'h23', timeZone: timezone
+            }).format(date));
         }
 
         function levelInfo(level) {
@@ -169,11 +298,20 @@
         }
 
         function paintMap() {
-            Object.keys(pathsByCode).forEach(function (code) {
-                var path = pathsByCode[code];
+            Object.keys(mapEntries).forEach(function (code) {
                 var level = departmentLevel(code, currentHazard, currentDayIndex);
-                path.setAttribute('fill', levelInfo(level).color);
-                path.classList.toggle('is-selected', code === selectedDepartment);
+                var color = levelInfo(level).color;
+                var iconChar = level >= ICON_MIN_LEVEL ? (HAZARD_ICONS[currentHazard] || '') : '';
+                mapEntries[code].forEach(function (entry) {
+                    entry.path.setAttribute('fill', color);
+                    entry.path.classList.toggle('is-selected', code === selectedDepartment);
+                    if (iconChar && entry.showIcon) {
+                        entry.icon.textContent = iconChar;
+                        entry.icon.style.display = '';
+                    } else {
+                        entry.icon.style.display = 'none';
+                    }
+                });
             });
         }
 
@@ -216,13 +354,13 @@
             var department = manifest && manifest.departments ? manifest.departments[selectedDepartment || Object.keys(manifest.departments)[0]] : null;
             var daily = department ? department.daily : [];
             var formatter = dayFormatter();
-            var labels = ['J', 'J+1', 'J+2', 'J+3', 'J+4'];
+            var labels = ['J0', 'J1', 'J2', 'J3', 'J4'];
             daily.forEach(function (entry, index) {
                 var date = new Date(entry.date + 'T12:00:00Z');
                 var button = document.createElement('button');
                 button.type = 'button';
                 button.className = 'hrw-tab';
-                button.textContent = (labels[index] || ('J+' + index)) + ' · ' + formatter.format(date);
+                button.textContent = (labels[index] || ('J' + index)) + ' · ' + formatter.format(date);
                 button.classList.toggle('is-active', index === currentDayIndex);
                 button.addEventListener('click', function () {
                     setDay(index);
@@ -310,37 +448,75 @@
             renderFrise(department);
         }
 
+        function renderAdvice(level) {
+            if (!adviceText) { return; }
+            var message = ADVICE[detailHazard] || '';
+            if (level >= 3) {
+                message += ' Restez particulièrement vigilant et suivez l’évolution de la situation.';
+            }
+            adviceText.textContent = message;
+        }
+
         function renderFrise(department) {
             friseHazardLabel.textContent = hazardLabel(detailHazard);
             friseTrack.replaceChildren();
-            var hourly = department.hourly || [];
+            if (friseLabels) { friseLabels.replaceChildren(); }
+
+            var dayEntry = department.daily[currentDayIndex];
+            if (!dayEntry) { return; }
+
+            var hourlyAll = department.hourly || [];
+            var dayHours = hourlyAll.filter(function (entry) {
+                return zonedDateKey(entry.time, timezone) === dayEntry.date;
+            });
+            if (!dayHours.length) { return; }
+
+            // Tick de clôture « 0h » du lendemain, pour boucler l'affichage
+            // 0h → 21h → 0h comme sur la maquette fournie.
+            var lastIndex = hourlyAll.indexOf(dayHours[dayHours.length - 1]);
+            var closingEntry = lastIndex >= 0 ? hourlyAll[lastIndex + 1] : null;
+            var cells = closingEntry ? dayHours.concat([closingEntry]) : dayHours;
+
             var formatter = hourFormatter();
-            var lastDate = null;
-            hourly.forEach(function (entry) {
+            cells.forEach(function (entry, index) {
                 var level = (entry.hazards || {})[detailHazard] || 0;
                 var info = levelInfo(level);
+                var localDate = new Date(entry.time);
+                var isClosing = !!closingEntry && index === cells.length - 1;
+
                 var cell = document.createElement('div');
                 cell.className = 'hrw-frise-hour';
                 cell.style.backgroundColor = info.color;
-                var date = new Date(entry.time);
-                var dateKey = date.toISOString().slice(0, 10);
-                if (lastDate !== null && dateKey !== lastDate) {
+                if (isClosing) {
                     cell.setAttribute('data-hrw-day-boundary', '1');
                 }
-                lastDate = dateKey;
-                cell.title = formatter.format(date) + ' — ' + hazardLabel(detailHazard) + ' : ' + info.label;
+                cell.title = formatter.format(localDate) + ' — ' + hazardLabel(detailHazard) + ' : ' + info.label;
                 friseTrack.appendChild(cell);
+
+                if (friseLabels) {
+                    var tick = document.createElement('span');
+                    tick.className = 'hrw-frise-tick';
+                    var hour = isClosing ? 0 : localHourOf(localDate);
+                    if (isClosing || hour % 3 === 0) {
+                        tick.textContent = hour + 'h';
+                    }
+                    friseLabels.appendChild(tick);
+                }
             });
+
+            renderAdvice(dayEntry.hazards[detailHazard] || 0);
         }
 
-        function buildMap(geojson) {
-            var bounds = computeBounds(geojson);
-            var project = buildProjector(bounds, 1000, 12);
-            geojson.features.forEach(function (feature) {
+        function buildMapInto(svgEl, features, viewSize, padding, suppressIconCodes) {
+            if (!svgEl || !features.length) { return; }
+            var bounds = computeBoundsFromFeatures(features);
+            var project = buildProjector(bounds, viewSize, padding);
+            features.forEach(function (feature) {
                 var code = String((feature.properties || {}).code || '').toUpperCase();
                 var name = (feature.properties || {}).nom || code;
                 if (!code) { return; }
                 namesByCode[code] = name;
+
                 var path = document.createElementNS(SVG_NS, 'path');
                 path.setAttribute('d', pathForGeometry(feature.geometry, project));
                 path.setAttribute('data-code', code);
@@ -356,9 +532,38 @@
                         selectDepartment(code);
                     }
                 });
-                mapSvg.appendChild(path);
-                pathsByCode[code] = path;
+                svgEl.appendChild(path);
+
+                var ringPoints = largestExteriorRingPoints(feature.geometry, project);
+                var centroid = ringPoints.length ? polygonCentroid(ringPoints) : [0, 0];
+                var icon = document.createElementNS(SVG_NS, 'text');
+                icon.setAttribute('class', 'hrw-dept-icon');
+                icon.setAttribute('text-anchor', 'middle');
+                icon.setAttribute('dominant-baseline', 'central');
+                icon.setAttribute('x', centroid[0].toFixed(2));
+                icon.setAttribute('y', centroid[1].toFixed(2));
+                icon.style.display = 'none';
+                svgEl.appendChild(icon);
+
+                if (!mapEntries[code]) { mapEntries[code] = []; }
+                mapEntries[code].push({
+                    path: path,
+                    icon: icon,
+                    showIcon: suppressIconCodes.indexOf(code) === -1
+                });
             });
+        }
+
+        function buildMap(geojson) {
+            var features = geojson.features || [];
+            buildMapInto(mapSvg, features, 1000, 12, IDF_CODES);
+
+            var idfFeatures = features.filter(function (feature) {
+                var code = String((feature.properties || {}).code || '').toUpperCase();
+                return IDF_CODES.indexOf(code) !== -1;
+            });
+            buildMapInto(insetSvg, idfFeatures, 300, 14, []);
+
             mapLoading.hidden = true;
         }
 
@@ -550,6 +755,16 @@
             return;
         }
 
+        widenToFitAncestor(app);
+        var widenTimer = null;
+        function scheduleWiden() {
+            window.clearTimeout(widenTimer);
+            widenTimer = window.setTimeout(function () {
+                widenToFitAncestor(app);
+            }, 150);
+        }
+        window.addEventListener('resize', scheduleWiden);
+
         Promise.all([
             fetchJson(baseUrl + '/risques.json'),
             fetchText(geojsonUrl).then(function (text) { return JSON.parse(text); })
@@ -587,6 +802,10 @@
             if (selectedDepartment && manifest.departments[selectedDepartment]) {
                 selectDepartment(selectedDepartment);
             }
+
+            [300, 1000, 2500].forEach(function (delay) {
+                window.setTimeout(function () { widenToFitAncestor(app); }, delay);
+            });
         }).catch(function (error) {
             mapLoading.textContent = 'Les données de vigilance ne sont pas encore disponibles : ' + error.message;
         });

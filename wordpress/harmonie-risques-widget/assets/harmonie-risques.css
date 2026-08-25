@@ -7,7 +7,7 @@
     --hrw-muted: #9aa0b2;
     --hrw-accent: #4fb0e8;
     width: 100%;
-    max-width: 1400px;
+    max-width: 1600px;
     box-sizing: border-box;
     margin: 1.25rem auto;
     overflow: hidden;
@@ -231,6 +231,61 @@
     stroke-width: 2.2;
 }
 
+.hrw-dept-icon {
+    pointer-events: none;
+    font-size: 26px;
+    filter: drop-shadow(0 0 2px rgba(0, 0, 0, .85));
+}
+
+.hrw-inset-map .hrw-dept-icon {
+    font-size: 30px;
+}
+
+.hrw-map-inset-wrap {
+    position: absolute;
+    top: 28px;
+    right: 28px;
+    width: 34%;
+    max-width: 220px;
+    padding: 6px;
+    border: 1px solid var(--hrw-border);
+    border-radius: 10px;
+    background: rgba(13, 15, 20, .82);
+    box-shadow: 0 8px 22px rgba(0, 0, 0, .4);
+}
+
+.hrw-inset-map {
+    display: block;
+    width: 100%;
+    height: auto;
+    aspect-ratio: 1 / 1;
+}
+
+.hrw-inset-map path {
+    stroke: #0a0c10;
+    stroke-width: 1.4;
+    cursor: pointer;
+    transition: filter .12s ease;
+}
+
+.hrw-inset-map path:hover {
+    filter: brightness(1.2);
+}
+
+.hrw-inset-map path.is-selected {
+    stroke: #fff;
+    stroke-width: 2.6;
+}
+
+.hrw-inset-label {
+    display: block;
+    margin-top: 4px;
+    text-align: center;
+    font-size: .68rem;
+    font-weight: 700;
+    color: var(--hrw-muted);
+}
+
 .hrw-map-loading {
     position: absolute;
     inset: 16px;
@@ -364,10 +419,46 @@
 
 .hrw-frise-labels {
     display: flex;
-    justify-content: space-between;
     margin-top: 4px;
+}
+
+.hrw-frise-tick {
+    flex: 1 1 0;
+    min-width: 3px;
+    text-align: center;
     font-size: .68rem;
     color: var(--hrw-muted);
+    white-space: nowrap;
+}
+
+.hrw-advice {
+    margin-top: 18px;
+    padding: 14px;
+    border: 1px solid var(--hrw-border);
+    border-radius: 10px;
+    background: var(--hrw-panel);
+}
+
+.hrw-advice h4 {
+    margin: 0 0 6px;
+    font-size: .9rem;
+    color: var(--hrw-text);
+}
+
+.hrw-advice-subtitle {
+    margin: 0 0 4px;
+    font-size: .74rem;
+    font-weight: 800;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+    color: var(--hrw-accent);
+}
+
+.hrw-advice-text {
+    margin: 0;
+    font-size: .86rem;
+    color: var(--hrw-muted);
+    line-height: 1.5;
 }
 
 .hrw-footer {
@@ -402,5 +493,13 @@
     .hrw-map-wrap {
         border-right: 0;
         border-bottom: 1px solid var(--hrw-border);
+    }
+    .hrw-map-inset-wrap {
+        top: 12px;
+        right: 12px;
+        max-width: 130px;
+    }
+    .hrw-inset-map .hrw-dept-icon {
+        font-size: 20px;
     }
 }

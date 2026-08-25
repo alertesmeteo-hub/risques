@@ -3,7 +3,7 @@
  * Plugin Name: Carte de Vigilance HARMONIE (risques)
  * Plugin URI: https://github.com/alertesmeteo-hub/risques
  * Description: Carte de risques météo non officielle (9 aléas, 5 niveaux, J/J+1/J+2) dérivée du modèle HARMONIE, avec recherche de commune, géolocalisation et frises horaires.
- * Version: 1.0.0
+ * Version: 1.1.0
  * Author: Alertes Météo Hub
  * Requires at least: 5.8
  * Requires PHP: 7.4
@@ -14,7 +14,7 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-define('HRW_VERSION', '1.0.0');
+define('HRW_VERSION', '1.1.0');
 define('HRW_RELEASE_DATE', '2026-08-25');
 define('HRW_OPTION_BASE_URL', 'hrw_risques_data_base_url');
 define(
@@ -245,6 +245,10 @@ function hrw_render_shortcode($atts) {
             <div class="hrw-map-wrap">
                 <svg class="hrw-map" data-hrw-map viewBox="0 0 1000 1000" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Carte des départements de France"></svg>
                 <div class="hrw-map-loading" data-hrw-map-loading>Chargement de la carte…</div>
+                <div class="hrw-map-inset-wrap">
+                    <svg class="hrw-inset-map" data-hrw-inset-map viewBox="0 0 300 300" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Carte détaillée de l’Île-de-France"></svg>
+                    <span class="hrw-inset-label">Île-de-France</span>
+                </div>
                 <div class="hrw-legend" data-hrw-legend></div>
                 <div class="hrw-map-tools">
                     <button type="button" data-hrw-capture title="Capturer l’image affichée">📷 Capture PNG</button>
@@ -260,6 +264,12 @@ function hrw_render_shortcode($atts) {
                     <div class="hrw-frise" data-hrw-frise>
                         <h4>Frise horaire — <span data-hrw-frise-hazard></span></h4>
                         <div class="hrw-frise-track" data-hrw-frise-track></div>
+                        <div class="hrw-frise-labels" data-hrw-frise-labels></div>
+                    </div>
+                    <div class="hrw-advice" data-hrw-advice>
+                        <h4>Détails des phénomènes</h4>
+                        <p class="hrw-advice-subtitle">Bonnes pratiques</p>
+                        <p class="hrw-advice-text" data-hrw-advice-text></p>
                     </div>
                 </div>
             </div>
