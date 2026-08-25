@@ -43,7 +43,7 @@ except ImportError:  # pragma: no cover - Python < 3.9 non pris en charge ici
 
 
 LOGGER = logging.getLogger("risques")
-PIPELINE_VERSION = "2.1.0"
+PIPELINE_VERSION = "2.2.0"
 PARIS_TZ = ZoneInfo("Europe/Paris") if ZoneInfo is not None else timezone.utc
 
 DEFAULT_HARMONIE_BASE_URL = (
@@ -89,29 +89,46 @@ HAZARD_LABELS = {
 # orange → rouge → violet), seule la longueur varie selon le nombre de
 # paliers de l'aléa.
 _RAMP_5 = ["#e8f5e9", "#a5d6a7", "#fff59d", "#ffcc80", "#ce93d8"]
-_RAMP_8 = [
-    "#e8f5e9", "#c5e1a5", "#fff59d", "#ffe082",
-    "#ffb74d", "#ff8a65", "#e57373", "#ce93d8",
+_RAMP_7 = [
+    "#e8f5e9", "#c5e1a5", "#fff59d",
+    "#ffe082", "#ffb74d", "#e57373", "#ce93d8",
 ]
 _RAMP_4 = ["#e8f5e9", "#fff59d", "#ffb74d", "#ce93d8"]
 
-# Libellés génériques réutilisés pour les aléas à seuils numériques (aucun
-# nom n'a été fourni palier par palier pour chaleur/pluie/vent/froid/neige,
-# seulement des valeurs) — à ajuster si un vocabulaire différent est
-# préféré.
-_TIERS_7 = ["Faible", "Modéré", "Marqué", "Fort", "Très fort", "Intense", "Extrême"]
+# Libellés génériques pour les 6 paliers des aléas à seuils numériques
+# (chaleur/pluie/vent/froid/neige) — le nom du palier PLUS le seuil réel
+# qu'il représente, pour que la légende affiche directement la valeur
+# plutôt qu'un mot vague seul (demandé explicitement).
+_TIERS_6 = ["Faible", "Modéré", "Marqué", "Fort", "Très fort", "Extrême"]
+
+
+def _numeric_tier_labels(thresholds: tuple[float, ...], unit: str, below: bool = False) -> list[str]:
+    """« Nul », puis un libellé par seuil : « Faible (≥ 28°C) », etc.
+    ``thresholds`` doit avoir exactement len(_TIERS_6) éléments, dans le
+    même ordre que celui attendu par _threshold_level/_threshold_level_below
+    (ascendant, ou descendant si ``below``)."""
+
+    comparator = "≤" if below else "≥"
+    labels = ["Nul"]
+    for name, threshold in zip(_TIERS_6, thresholds):
+        value = f"{threshold:g}"
+        labels.append(f"{name} ({comparator} {value} {unit})")
+    return labels
+
 
 HAZARD_LEVELS: dict[str, list[str]] = {
-    # Aléas à seuils numériques (7 paliers + Nul).
-    "vent": ["Nul", *_TIERS_7],
-    "pluie_inondation": ["Nul", *_TIERS_7],
+    # Aléas à seuils numériques (6 paliers + Nul) — construits plus bas à
+    # partir des constantes *_THRESHOLDS* pour rester en phase avec le
+    # calcul réel plutôt que dupliquer les valeurs ici.
+    "vent": [],
+    "pluie_inondation": [],
     # Aléas à code de risque HARMONIE (0-4, passthrough) : mêmes libellés
     # génériques pour les deux, dans l'esprit fourni pour les orages.
     "orages": ["Nul", "Faible / Modéré", "Marqué / Fort", "Intense / Violent", "Extrême"],
     "grele": ["Nul", "Faible / Modéré", "Marqué / Fort", "Intense / Violent", "Extrême"],
-    "chaleur": ["Nul", *_TIERS_7],
-    "froid": ["Nul", *_TIERS_7],
-    "neige": ["Nul", *_TIERS_7],
+    "chaleur": [],
+    "froid": [],
+    "neige": [],
     # Verglas : 3 paliers qualitatifs fournis explicitement.
     "verglas": [
         "Nul",
@@ -128,8 +145,8 @@ HAZARD_LEVELS: dict[str, list[str]] = {
 def _ramp_for(level_count: int) -> list[str]:
     if level_count == 5:
         return _RAMP_5
-    if level_count == 8:
-        return _RAMP_8
+    if level_count == 7:
+        return _RAMP_7
     if level_count == 4:
         return _RAMP_4
     raise ValueError(f"Pas de rampe de couleurs définie pour {level_count} paliers")
@@ -338,16 +355,30 @@ def _threshold_level_below(value: float, thresholds: tuple[float, ...]) -> int:
 
 
 # Seuils numériques (ascendants) fournis explicitement pour chaque aléa —
-# le nombre de valeurs fixe le nombre de paliers (7 seuils -> 8 paliers dont
-# Nul). ``_threshold_level`` incrémente le niveau à chaque seuil atteint ou
-# dépassé, donc ces tuples doivent rester en ordre croissant.
-CHALEUR_THRESHOLDS = (25.0, 28.0, 31.0, 34.0, 37.0, 40.0, 45.0)
-PLUIE_THRESHOLDS_MM = (15.0, 30.0, 50.0, 80.0, 150.0, 300.0, 500.0)
-VENT_THRESHOLDS_KMH = (80.0, 90.0, 100.0, 110.0, 130.0, 150.0, 180.0)
-NEIGE_THRESHOLDS_CM = (0.1, 1.0, 3.0, 7.0, 15.0, 30.0, 50.0)
+# le nombre de valeurs fixe le nombre de paliers (6 seuils -> 6 paliers +
+# Nul = 7 niveaux, 0 à 6). ``_threshold_level`` incrémente le niveau à
+# chaque seuil atteint ou dépassé, donc ces tuples doivent rester en ordre
+# croissant. Le palier le plus bas initialement fourni (ex. 25°C pour
+# Chaleur, 15mm pour Pluie) a été fondu dans Nul : demandé explicitement
+# (6 paliers, pas 7) après une première version à 7 seuils.
+CHALEUR_THRESHOLDS = (28.0, 31.0, 34.0, 37.0, 40.0, 45.0)
+PLUIE_THRESHOLDS_MM = (30.0, 50.0, 80.0, 150.0, 300.0, 500.0)
+VENT_THRESHOLDS_KMH = (90.0, 100.0, 110.0, 130.0, 150.0, 180.0)
+NEIGE_THRESHOLDS_CM = (1.0, 3.0, 7.0, 15.0, 30.0, 50.0)
 # ``_threshold_level_below`` a besoin de l'ordre inverse (du seuil le plus
 # « chaud »/le moins sévère au plus froid) — cf. sa docstring.
-FROID_THRESHOLDS_BELOW = (1.0, -3.0, -6.0, -10.0, -15.0, -20.0, -30.0)
+FROID_THRESHOLDS_BELOW = (-3.0, -6.0, -10.0, -15.0, -20.0, -30.0)
+
+# Les libellés de légende intègrent directement le seuil réel (ex.
+# « Faible (≥ 28°C) ») plutôt qu'un mot seul — demandé explicitement,
+# « qu'il faut mettre en légende ». Complète les entrées vides laissées
+# dans HAZARD_LEVELS plus haut (qui doivent rester en phase avec ces
+# constantes plutôt que dupliquer les seuils à deux endroits).
+HAZARD_LEVELS["chaleur"] = _numeric_tier_labels(CHALEUR_THRESHOLDS, "°C")
+HAZARD_LEVELS["pluie_inondation"] = _numeric_tier_labels(PLUIE_THRESHOLDS_MM, "mm")
+HAZARD_LEVELS["vent"] = _numeric_tier_labels(VENT_THRESHOLDS_KMH, "km/h")
+HAZARD_LEVELS["neige"] = _numeric_tier_labels(NEIGE_THRESHOLDS_CM, "cm")
+HAZARD_LEVELS["froid"] = _numeric_tier_labels(FROID_THRESHOLDS_BELOW, "°C", below=True)
 
 
 def hourly_hazard_levels(
