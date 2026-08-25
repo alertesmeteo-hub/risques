@@ -255,16 +255,6 @@
     color: #fff;
 }
 
-.hrw-fire-disclaimer {
-    margin: 0;
-    padding: 10px 24px;
-    background: #fff3e0;
-    color: #8a5a00;
-    font-size: .82rem;
-    font-weight: 600;
-    border-bottom: 1px solid #ffe0b2;
-}
-
 .hrw-body {
     display: grid;
     grid-template-columns: minmax(0, 2.6fr) minmax(220px, 1fr);
@@ -440,6 +430,23 @@
     pointer-events: none;
 }
 
+.hrw-legend-title {
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    z-index: 5;
+    margin: 0;
+    padding: 5px 12px;
+    border: 1px solid var(--hrw-border);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, .92);
+    box-shadow: 0 4px 12px rgba(15, 23, 42, .12);
+    font-size: 1.05rem;
+    font-weight: 800;
+    color: var(--hrw-text);
+    pointer-events: none;
+}
+
 .hrw-legend {
     display: flex;
     flex-wrap: wrap;
@@ -570,6 +577,19 @@
     position: relative;
     flex: 1 1 0;
     min-width: 3px;
+}
+
+/* Heure sans données (avant le début du run HARMONIE ce jour-là) : hachures
+   grises plutôt qu'une couleur de niveau, pour ne pas se confondre avec un
+   vrai « Nul » (vert). */
+.hrw-frise-hour-empty {
+    background: repeating-linear-gradient(
+        45deg,
+        #eceff3,
+        #eceff3 3px,
+        #dde1e8 3px,
+        #dde1e8 6px
+    );
 }
 
 .hrw-frise-labels {

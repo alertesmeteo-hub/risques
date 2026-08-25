@@ -43,7 +43,7 @@ except ImportError:  # pragma: no cover - Python < 3.9 non pris en charge ici
 
 
 LOGGER = logging.getLogger("risques")
-PIPELINE_VERSION = "2.4.0"
+PIPELINE_VERSION = "2.6.0"
 PARIS_TZ = ZoneInfo("Europe/Paris") if ZoneInfo is not None else timezone.utc
 
 DEFAULT_HARMONIE_BASE_URL = (
@@ -95,6 +95,10 @@ _RAMP_7 = [
 ]
 _RAMP_8 = [
     "#e8f5e9", "#c5e1a5", "#fff59d", "#ffe082",
+    "#ffb74d", "#ff8a65", "#e57373", "#ce93d8",
+]
+_RAMP_9 = [
+    "#e8f5e9", "#c5e1a5", "#a5d6a7", "#fff59d", "#ffe082",
     "#ffb74d", "#ff8a65", "#e57373", "#ce93d8",
 ]
 _RAMP_4 = ["#e8f5e9", "#fff59d", "#ffb74d", "#ce93d8"]
@@ -159,6 +163,8 @@ def _ramp_for(level_count: int) -> list[str]:
         return _RAMP_7
     if level_count == 8:
         return _RAMP_8
+    if level_count == 9:
+        return _RAMP_9
     if level_count == 4:
         return _RAMP_4
     raise ValueError(f"Pas de rampe de couleurs définie pour {level_count} paliers")
@@ -264,6 +270,10 @@ class DepartmentSeries:
     columns: dict[str, int]
     # forecast[i] est la matrice (points x colonnes) pour l'heure times[i]
     forecast: list[np.ndarray]
+    # Altitude (m) de chaque point de grille, même ordre/longueur que les
+    # lignes de ``forecast`` — vient de ``payload["points"]``, une valeur
+    # fixe par point (pas par heure), séparée des colonnes de prévision.
+    altitudes: np.ndarray
 
     def column(self, step_index: int, name: str) -> np.ndarray:
         index = self.columns.get(name)
@@ -291,6 +301,22 @@ def load_department_series(
     value_names: list[str] = payload["columns"]["values"]
     columns = {name: index for index, name in enumerate(value_names)}
 
+    # Altitude par point de grille (``payload["points"]``, schéma décrit par
+    # ``payload["columns"]["points"]``) — utilisée pour exclure les sommets
+    # non représentatifs des zones habitées de certains calculs (rafales,
+    # gel). Absente ou mal formée : on retombe sur des NaN, qui ne filtrent
+    # rien (comportement identique à avant l'ajout de ce filtre).
+    points_schema: list[str] = ((payload.get("columns") or {}).get("points")) or []
+    points_raw = payload.get("points") or []
+    if "model_altitude_m" in points_schema and points_raw:
+        alt_index = points_schema.index("model_altitude_m")
+        altitudes = np.asarray(
+            [np.nan if p[alt_index] is None else p[alt_index] for p in points_raw],
+            dtype=np.float64,
+        )
+    else:
+        altitudes = np.full(len(points_raw), np.nan, dtype=np.float64)
+
     times: list[datetime] = []
     forecast: list[np.ndarray] = []
     for iso_time, rows in payload.get("forecast", []):
@@ -308,7 +334,9 @@ def load_department_series(
             matrix = np.empty((0, len(value_names)), dtype=np.float64)
         forecast.append(matrix)
 
-    return DepartmentSeries(code=code, times=times, columns=columns, forecast=forecast)
+    return DepartmentSeries(
+        code=code, times=times, columns=columns, forecast=forecast, altitudes=altitudes
+    )
 
 
 def _nanpercentile_high(values: np.ndarray, percentile: float = 90.0) -> float:
@@ -374,7 +402,11 @@ def _threshold_level_below(value: float, thresholds: tuple[float, ...]) -> int:
 # intermédiaire à 6 ; Froid/Neige restent à 6, non concernés par ce
 # dernier ajustement.
 CHALEUR_THRESHOLDS = (25.0, 28.0, 31.0, 34.0, 37.0, 40.0, 45.0)
-PLUIE_THRESHOLDS_MM = (5.0, 15.0, 30.0, 50.0, 80.0, 150.0, 300.0)
+# 8 seuils (pas 7) : contrairement à Chaleur/Vent, Pluie a gagné un palier
+# supplémentaire (500mm) en plus du nouveau palier bas (5mm) — le 500mm
+# avait été supprimé par erreur lors de l'ajout du 5mm, alors qu'il devait
+# rester comme palier « Extrême » le plus haut.
+PLUIE_THRESHOLDS_MM = (5.0, 15.0, 30.0, 50.0, 80.0, 150.0, 300.0, 500.0)
 VENT_THRESHOLDS_KMH = (80.0, 90.0, 100.0, 110.0, 130.0, 150.0, 180.0)
 NEIGE_THRESHOLDS_CM = (1.0, 3.0, 7.0, 15.0, 30.0, 50.0)
 # ``_threshold_level_below`` a besoin de l'ordre inverse (du seuil le plus
@@ -412,6 +444,31 @@ def _safe_min(values: np.ndarray) -> float:
     return float(np.min(finite)) if finite.size else float("nan")
 
 
+# Altitude au-delà de laquelle un point de grille est exclu de certains
+# calculs : un sommet ou un col en très haute montagne n'est représentatif
+# d'aucune zone habitée, et produit des valeurs extrêmes mais non
+# pertinentes pour une carte de vigilance grand public — constaté en
+# production (rafale à 260 km/h relevée en Haute-Savoie, sur un point de
+# grille en haute montagne).
+VENT_MAX_ALTITUDE_M = 2000.0
+GEL_MAX_ALTITUDE_M = 1500.0
+
+
+def _filtered_by_altitude(
+    values: np.ndarray, altitudes: np.ndarray, max_altitude_m: float
+) -> np.ndarray:
+    if values.size != altitudes.size:
+        # Décalage inattendu (schéma de points absent/différent) : on ne
+        # filtre pas plutôt que de fausser silencieusement le calcul.
+        return values
+    mask = np.isfinite(altitudes) & (altitudes <= max_altitude_m)
+    if not mask.any():
+        # Département entièrement au-dessus du seuil (improbable) : mieux
+        # vaut une valeur non filtrée qu'aucune donnée du tout.
+        return values
+    return values[mask]
+
+
 def hourly_hazard_levels(
     series: DepartmentSeries,
     step_index: int,
@@ -441,24 +498,33 @@ def hourly_hazard_levels(
     visibility = col("visibility_km")
     precipitation_now = col("precipitation_mm")
 
+    # Rafales (Vent) et température minimale (Froid/gel) : un sommet ou un
+    # col de haute montagne n'est représentatif d'aucune zone habitée —
+    # exclu de ces deux calculs seulement (pas de la température maximale,
+    # une altitude élevée ne produit pas de chaleur artificiellement
+    # élevée, donc rien à corriger côté Chaleur).
+    wind_gust_populated = _filtered_by_altitude(wind_gust, series.altitudes, VENT_MAX_ALTITUDE_M)
+    temperature_populated_low = _filtered_by_altitude(temperature, series.altitudes, GEL_MAX_ALTITUDE_M)
+
     # Valeurs brutes (max/min réels, pas le perçentile) pour le résumé
     # national « records du jour » — objectif différent du niveau d'alerte
     # (qui doit rester insensible à un point isolé), ici on veut justement
-    # la valeur la plus extrême relevée quelque part.
+    # la valeur la plus extrême relevée quelque part (parmi les points
+    # retenus après filtre d'altitude pour rafale/gel).
     raw_extremes = {
         "max_temperature": _safe_max(temperature),
-        "min_temperature": _safe_min(temperature),
-        "max_gust": _safe_max(wind_gust),
+        "min_temperature": _safe_min(temperature_populated_low),
+        "max_gust": _safe_max(wind_gust_populated),
     }
 
     # Perçentiles plutôt que max/min strict : même correction que pour les
     # aléas à code de risque (cf. _nanpercentile_high) — une seule commune
     # ne doit pas suffire à faire basculer tout le département.
     max_temperature = _nanpercentile_high(temperature)
-    min_temperature = _nanpercentile_low(temperature)
+    min_temperature = _nanpercentile_low(temperature_populated_low)
     min_humidity = _nanpercentile_low(humidity)
     max_wind = _nanpercentile_high(wind_speed)
-    max_gust = _nanpercentile_high(wind_gust)
+    max_gust = _nanpercentile_high(wind_gust_populated)
     min_visibility = _nanpercentile_low(visibility)
     precip_now_repr = _nanpercentile_high(precipitation_now)
 

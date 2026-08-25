@@ -96,18 +96,62 @@
         return svg;
     }
 
-    var ADVICE = {
-        orages: 'Des orages sont possibles dans les prochaines heures. Consultez régulièrement les prévisions et restez attentifs.',
-        grele: 'Des chutes de grêle sont possibles. Mettez à l’abri les véhicules et objets fragiles si besoin.',
-        pluie_inondation: 'De fortes pluies peuvent provoquer des ruissellements ou des inondations locales. Évitez les sous-sols et les zones habituellement inondables.',
-        vent: 'Des rafales de vent sont attendues. Évitez les activités exposées et rangez les objets susceptibles de s’envoler.',
-        neige: 'De la neige est possible et peut rendre les routes glissantes. Adaptez votre conduite et anticipez vos déplacements.',
-        verglas: 'Des plaques de verglas ou de la pluie verglaçante sont possibles. Réduisez votre vitesse, augmentez les distances de sécurité.',
-        chaleur: 'Des températures élevées sont attendues. Hydratez-vous régulièrement et évitez les efforts aux heures les plus chaudes.',
-        froid: 'Des températures basses sont attendues. Protégez-vous du froid et limitez les expositions prolongées.',
-        brouillard: 'La visibilité peut être fortement réduite. Réduisez votre vitesse et augmentez les distances de sécurité.',
-        feu: 'Les conditions météo peuvent favoriser le développement d’un feu. Respectez les consignes locales et évitez tout départ de flamme.'
+    // 3 paliers par aléa (léger / modéré / sévère), choisis en fonction de
+    // la position du niveau réel dans l'échelle de l'aléa (cf.
+    // adviceTierIndex) — rien n'est affiché au niveau 0 (Nul).
+    var ADVICE_TIERS = {
+        orages: [
+            'Des orages sont possibles. Consultez régulièrement les prévisions et restez attentifs.',
+            'Des orages marqués sont attendus, avec un risque de grêle ou de rafales. Mettez à l’abri les objets sensibles.',
+            'De violents orages sont attendus. Évitez les déplacements, éloignez-vous des points hauts et des zones exposées à la foudre.'
+        ],
+        grele: [
+            'De la grêle est possible en cas d’averse orageuse.',
+            'De la grêle marquée est possible. Mettez les véhicules à l’abri si possible.',
+            'De la grêle intense est possible, avec un risque de dégâts. Mettez impérativement les véhicules et objets fragiles à l’abri.'
+        ],
+        pluie_inondation: [
+            'De la pluie est attendue, pouvant localement provoquer des ruissellements.',
+            'De fortes pluies sont attendues, avec un risque de ruissellement ou de débordement localisé. Évitez les sous-sols et les points bas.',
+            'De très fortes pluies sont attendues, avec un risque d’inondation important. Ne vous engagez pas sur une route inondée et suivez les consignes des autorités.'
+        ],
+        vent: [
+            'Des rafales de vent sont possibles. Rangez les objets légers susceptibles de s’envoler.',
+            'De fortes rafales de vent sont attendues. Évitez les activités exposées et fixez ce qui peut être emporté.',
+            'De violentes rafales de vent sont attendues. Évitez les déplacements non indispensables et restez à l’écart des arbres et structures fragiles.'
+        ],
+        neige: [
+            'De la neige est possible, pouvant rendre les routes glissantes.',
+            'Des chutes de neige marquées sont attendues. Anticipez vos déplacements et équipez votre véhicule si besoin.',
+            'De fortes chutes de neige sont attendues. Évitez les déplacements non indispensables et suivez l’évolution des conditions de circulation.'
+        ],
+        verglas: [
+            'Un risque de verglas localisé est possible au sol.',
+            'Un risque de pluie verglaçante est possible : la chaussée peut devenir brutalement glissante. Adaptez votre conduite.',
+            'Un épisode durable de pluie verglaçante est attendu. Évitez les déplacements non indispensables, la chaussée peut rester dangereuse plusieurs heures.'
+        ],
+        chaleur: [
+            'Des températures élevées sont attendues. Hydratez-vous régulièrement.',
+            'De fortes chaleurs sont attendues. Évitez les efforts aux heures les plus chaudes et surveillez les personnes fragiles.',
+            'Une chaleur extrême est attendue. Limitez les sorties et les efforts, hydratez-vous fréquemment, veillez sur les personnes vulnérables.'
+        ],
+        froid: [
+            'Des températures basses sont attendues. Pensez à vous couvrir.',
+            'Un froid marqué est attendu. Limitez les expositions prolongées et protégez les canalisations sensibles au gel.',
+            'Un froid extrême est attendu. Évitez les expositions prolongées et soyez vigilant vis-à-vis des personnes vulnérables et des risques de gel.'
+        ],
+        brouillard: [
+            'La visibilité peut être réduite par endroits.',
+            'La visibilité peut être fortement réduite. Réduisez votre vitesse et augmentez les distances de sécurité.',
+            'La visibilité peut être très fortement réduite (brouillard dense). Redoublez de prudence, envisagez de reporter vos déplacements.'
+        ],
+        feu: [
+            'Les conditions météo peuvent légèrement favoriser le développement d’un feu. Respectez les consignes locales.',
+            'Les conditions météo peuvent favoriser le développement d’un feu. Respectez les consignes locales et évitez tout départ de flamme.',
+            'Les conditions météo sont très favorables au développement et à la propagation d’un feu. Soyez extrêmement vigilant et respectez strictement les interdictions locales.'
+        ]
     };
+    var FEU_DISCLAIMER = 'Important : ce niveau mesure seulement le cocktail météo chaleur, humidité, vent et pluie. Il reste non officiel et ne remplace pas la Météo des forêts.';
 
     function whenReady(callback) {
         if (document.readyState === 'loading') {
@@ -319,11 +363,11 @@
         var summaryPrecip = app.querySelector('[data-hrw-summary-precip]');
         var hazardTabs = app.querySelector('[data-hrw-hazard-tabs]');
         var dayTabs = app.querySelector('[data-hrw-day-tabs]');
-        var fireDisclaimer = app.querySelector('[data-hrw-fire-disclaimer]');
         var mapSvg = app.querySelector('[data-hrw-map]');
         var insetSvg = app.querySelector('[data-hrw-inset-map]');
         var mapWrap = app.querySelector('.hrw-map-wrap');
         var mapLoading = app.querySelector('[data-hrw-map-loading]');
+        var legendTitle = app.querySelector('[data-hrw-legend-title]');
         var legend = app.querySelector('[data-hrw-legend]');
         var detailPlaceholder = app.querySelector('[data-hrw-detail-placeholder]');
         var detailContent = app.querySelector('[data-hrw-detail-content]');
@@ -332,6 +376,7 @@
         var friseHazardLabel = app.querySelector('[data-hrw-frise-hazard]');
         var friseTrack = app.querySelector('[data-hrw-frise-track]');
         var friseLabels = app.querySelector('[data-hrw-frise-labels]');
+        var adviceBox = app.querySelector('[data-hrw-advice]');
         var adviceText = app.querySelector('[data-hrw-advice-text]');
         var captureButton = app.querySelector('[data-hrw-capture]');
         var copyButton = app.querySelector('[data-hrw-copy]');
@@ -383,11 +428,14 @@
             return scale ? Object.keys(scale).length - 1 : 4;
         }
 
-        // « X/N » à côté du libellé : les échelles n'ont plus toutes le
+        // « (X/N) » à côté du libellé : les échelles n'ont plus toutes le
         // même nombre de paliers (4 à 8 selon l'aléa), utile pour situer un
-        // niveau sans avoir la légende sous les yeux.
-        function levelFraction(hazard, level) {
-            return level + '/' + maxLevelFor(hazard);
+        // niveau sans avoir la légende sous les yeux. Rien n'est affiché
+        // pour le niveau 0 (Nul) : « Nul (0/7) » n'a pas de sens, il n'y a
+        // pas d'alerte à situer sur l'échelle.
+        function levelSuffix(hazard, level) {
+            if (!level) { return ''; }
+            return ' (' + level + '/' + maxLevelFor(hazard) + ')';
         }
 
         function hazardLabel(hazard) {
@@ -428,6 +476,9 @@
             // changement d'aléa plutôt que dessinée une seule fois.
             legend.replaceChildren();
             var maxLevel = maxLevelFor(currentHazard);
+            if (legendTitle) {
+                legendTitle.textContent = hazardLabel(currentHazard) + ' 0/' + maxLevel;
+            }
             for (var level = 0; level <= maxLevel; level++) {
                 var info = levelInfo(currentHazard, level);
                 var item = document.createElement('div');
@@ -487,10 +538,6 @@
             Array.prototype.forEach.call(hazardTabs.children, function (button) {
                 button.classList.toggle('is-active', button.dataset.hazard === hazard);
             });
-            fireDisclaimer.hidden = hazard !== 'feu';
-            if (hazard === 'feu' && manifest) {
-                fireDisclaimer.textContent = '⚠️ ' + manifest.fire_disclaimer;
-            }
             buildLegend();
             paintMap();
             renderDetail();
@@ -548,7 +595,7 @@
                 var levelSpan = document.createElement('span');
                 levelSpan.className = 'hrw-hazard-level';
                 levelSpan.style.backgroundColor = info.color;
-                levelSpan.textContent = info.label + ' (' + levelFraction(hazard, level) + ')';
+                levelSpan.textContent = info.label + levelSuffix(hazard, level);
                 cell.appendChild(name2);
                 cell.appendChild(document.createElement('br'));
                 cell.appendChild(levelSpan);
@@ -564,13 +611,27 @@
 
         function renderAdvice(level) {
             if (!adviceText) { return; }
-            var message = ADVICE[detailHazard] || '';
-            // Seuil d'escalade relatif au nombre de paliers de l'aléa (les
-            // échelles n'ont plus toutes 5 paliers) : les ~40% les plus
-            // sévères déclenchent la phrase de vigilance renforcée.
+            // Rien à afficher au niveau Nul (0) : pas d'alerte, pas de
+            // conseil à donner.
+            if (!level) {
+                if (adviceBox) { adviceBox.hidden = true; }
+                adviceText.textContent = '';
+                return;
+            }
+            if (adviceBox) { adviceBox.hidden = false; }
+
+            // Palier léger/modéré/sévère choisi selon la position relative
+            // du niveau dans l'échelle propre à l'aléa (4 à 9 paliers selon
+            // les cas, donc un simple découpage en tiers plutôt que des
+            // seuils absolus).
             var maxLevel = maxLevelFor(detailHazard);
-            if (level >= Math.ceil(maxLevel * 0.6)) {
-                message += ' Restez particulièrement vigilant et suivez l’évolution de la situation.';
+            var ratio = maxLevel > 0 ? level / maxLevel : 1;
+            var tierIndex = ratio <= 1 / 3 ? 0 : (ratio <= 2 / 3 ? 1 : 2);
+            var tiers = ADVICE_TIERS[detailHazard] || [];
+            var message = tiers[tierIndex] || tiers[tiers.length - 1] || '';
+
+            if (detailHazard === 'feu') {
+                message += ' ' + FEU_DISCLAIMER;
             }
             adviceText.textContent = message;
         }
@@ -594,41 +655,55 @@
                 return;
             }
 
-            // Tick de clôture « 0h » du lendemain, pour boucler l'affichage
-            // 0h → 21h → 0h comme sur la maquette fournie.
+            // La frise doit toujours partir de minuit (0h), même le jour où
+            // le run HARMONIE lui-même n'a démarré que plus tard (ex. un run
+            // lancé à 9h ne peut pas avoir de données pour 0h-8h ce jour-là)
+            // — sinon la première case affichée n'était pas 0h mais l'heure
+            // de départ réelle du run, ce qui semblait être un bug. On
+            // construit donc les 24 cases une par une par heure locale, avec
+            // une case « pas de données » pour les heures manquantes,
+            // plutôt que de se contenter des entrées réellement présentes.
+            var hourMap = {};
+            dayHours.forEach(function (entry) {
+                hourMap[localHourOf(new Date(entry.time))] = entry;
+            });
+
             var lastIndex = hourlyAll.indexOf(dayHours[dayHours.length - 1]);
             var closingEntry = lastIndex >= 0 ? hourlyAll[lastIndex + 1] : null;
-            var cells = closingEntry ? dayHours.concat([closingEntry]) : dayHours;
-
-            // Espacement des repères d'heure calculé sur le nombre réel de
-            // cellules plutôt que sur un pas supposé de 3h : reste correct
-            // quelle que soit la cadence réelle des données HARMONIE (1h,
-            // 3h…), et garantit toujours au moins quelques repères visibles.
-            var tickEvery = Math.max(1, Math.round(dayHours.length / 8));
 
             var formatter = hourFormatter();
-            cells.forEach(function (entry, index) {
-                var level = (entry.hazards || {})[detailHazard] || 0;
-                var info = levelInfo(detailHazard, level);
-                var localDate = new Date(entry.time);
-                var isClosing = !!closingEntry && index === cells.length - 1;
 
+            function appendCell(hourLabel, entry) {
                 var cell = document.createElement('div');
                 cell.className = 'hrw-frise-hour';
-                cell.style.backgroundColor = info.color;
-                cell.title = formatter.format(localDate) + ' — ' + hazardLabel(detailHazard) + ' : ' + info.label + ' (' + levelFraction(detailHazard, level) + ')';
+                if (entry) {
+                    var level = (entry.hazards || {})[detailHazard] || 0;
+                    var info = levelInfo(detailHazard, level);
+                    cell.style.backgroundColor = info.color;
+                    cell.title = formatter.format(new Date(entry.time)) + ' — ' +
+                        hazardLabel(detailHazard) + ' : ' + info.label + levelSuffix(detailHazard, level);
+                } else {
+                    cell.classList.add('hrw-frise-hour-empty');
+                    cell.title = 'Données indisponibles pour cette heure (avant le début du run).';
+                }
                 friseTrack.appendChild(cell);
 
                 if (friseLabels) {
                     var tick = document.createElement('span');
                     tick.className = 'hrw-frise-tick';
-                    var hour = isClosing ? 0 : localHourOf(localDate);
-                    if (isClosing || index === 0 || index % tickEvery === 0) {
-                        tick.textContent = hour + 'h';
+                    if (hourLabel % 3 === 0) {
+                        tick.textContent = hourLabel + 'h';
                     }
                     friseLabels.appendChild(tick);
                 }
-            });
+            }
+
+            for (var hour = 0; hour <= 23; hour++) {
+                appendCell(hour, hourMap[hour] || null);
+            }
+            // Case de clôture « 0h » du lendemain, pour boucler l'affichage
+            // 0h → 21h → 0h comme sur la maquette fournie.
+            appendCell(0, closingEntry);
 
             renderAdvice(dayEntry.hazards[detailHazard] || 0);
         }
@@ -713,7 +788,7 @@
             var chip = document.createElement('div');
             chip.className = 'hrw-tooltip-chip';
             chip.style.backgroundColor = info.color;
-            chip.textContent = hazardLabel(currentHazard) + ' — ' + info.label + ' (' + levelFraction(currentHazard, level) + ')';
+            chip.textContent = hazardLabel(currentHazard) + ' — ' + info.label + levelSuffix(currentHazard, level);
             tooltip.appendChild(chip);
 
             var hourlyAll = department.hourly || [];
@@ -1078,11 +1153,6 @@
                     new Intl.DateTimeFormat('fr-FR', {
                         day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit'
                     }).format(new Date(manifest.generated_at));
-            }
-
-            if (defaultHazard === 'feu') {
-                fireDisclaimer.hidden = false;
-                fireDisclaimer.textContent = '⚠️ ' + manifest.fire_disclaimer;
             }
 
             if (selectedDepartment && manifest.departments[selectedDepartment]) {
