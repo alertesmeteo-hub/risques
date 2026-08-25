@@ -3,7 +3,7 @@
  * Plugin Name: Carte de Vigilance HARMONIE (risques)
  * Plugin URI: https://github.com/alertesmeteo-hub/risques
  * Description: Carte de risques météo non officielle (10 aléas, échelle propre à chaque aléa, J/J+1/J+2) dérivée du modèle HARMONIE, avec recherche de commune, géolocalisation et frises horaires.
- * Version: 2.1.0
+ * Version: 2.3.0
  * Author: Alertes Météo Hub
  * Requires at least: 5.8
  * Requires PHP: 7.4
@@ -14,7 +14,7 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-define('HRW_VERSION', '2.1.0');
+define('HRW_VERSION', '2.3.0');
 define('HRW_RELEASE_DATE', '2026-08-25');
 define('HRW_OPTION_BASE_URL', 'hrw_risques_data_base_url');
 define(
@@ -210,10 +210,21 @@ function hrw_render_shortcode($atts) {
         data-timezone="<?php echo esc_attr(wp_timezone_string()); ?>"
     >
         <header class="hrw-header">
-            <div>
-                <p class="hrw-kicker">VIGILANCE NON OFFICIELLE • MODÈLE HARMONIE</p>
-                <h2><?php echo esc_html($title); ?></h2>
-                <p class="hrw-meta" data-hrw-run>Chargement du dernier run…</p>
+            <div class="hrw-header-row">
+                <div>
+                    <p class="hrw-kicker">VIGILANCE NON OFFICIELLE • MODÈLE HARMONIE</p>
+                    <h2><?php echo esc_html($title); ?></h2>
+                    <p class="hrw-meta" data-hrw-run>Chargement du dernier run…</p>
+                </div>
+                <div class="hrw-national-summary" data-hrw-national-summary hidden>
+                    <p class="hrw-national-summary-title">France — J0</p>
+                    <dl>
+                        <div><dt>Maxi</dt><dd data-hrw-summary-max></dd></div>
+                        <div><dt>Mini</dt><dd data-hrw-summary-min></dd></div>
+                        <div><dt>Rafales maxi</dt><dd data-hrw-summary-gust></dd></div>
+                        <div><dt>Pluie maxi</dt><dd data-hrw-summary-precip></dd></div>
+                    </dl>
+                </div>
             </div>
         </header>
 

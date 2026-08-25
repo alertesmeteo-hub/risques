@@ -312,6 +312,11 @@
         var searchResults = app.querySelector('[data-hrw-search-results]');
         var runMeta = app.querySelector('[data-hrw-run]');
         var generated = app.querySelector('[data-hrw-generated]');
+        var nationalSummaryBox = app.querySelector('[data-hrw-national-summary]');
+        var summaryMax = app.querySelector('[data-hrw-summary-max]');
+        var summaryMin = app.querySelector('[data-hrw-summary-min]');
+        var summaryGust = app.querySelector('[data-hrw-summary-gust]');
+        var summaryPrecip = app.querySelector('[data-hrw-summary-precip]');
         var hazardTabs = app.querySelector('[data-hrw-hazard-tabs]');
         var dayTabs = app.querySelector('[data-hrw-day-tabs]');
         var fireDisclaimer = app.querySelector('[data-hrw-fire-disclaimer]');
@@ -611,9 +616,6 @@
                 var cell = document.createElement('div');
                 cell.className = 'hrw-frise-hour';
                 cell.style.backgroundColor = info.color;
-                if (isClosing) {
-                    cell.setAttribute('data-hrw-day-boundary', '1');
-                }
                 cell.title = formatter.format(localDate) + ' — ' + hazardLabel(detailHazard) + ' : ' + info.label + ' (' + levelFraction(detailHazard, level) + ')';
                 friseTrack.appendChild(cell);
 
@@ -631,6 +633,33 @@
             renderAdvice(dayEntry.hazards[detailHazard] || 0);
         }
 
+        // --- Petit résumé national (records du jour J0 : maxi/mini de
+        // température, rafale maxi, cumul de pluie maxi, chacun avec le
+        // département qui le détient). Toujours J0, indépendant de l'onglet
+        // jour actif — appelé une fois après le chargement des données.
+        function renderNationalSummary() {
+            if (!nationalSummaryBox) { return; }
+            var entry = manifest && Array.isArray(manifest.national_summary)
+                ? manifest.national_summary[0]
+                : null;
+            if (!entry) {
+                nationalSummaryBox.hidden = true;
+                return;
+            }
+
+            function label(field, unit, decimals) {
+                if (!field) { return '—'; }
+                var deptName = namesByCode[field.department] || field.department;
+                return field.value.toFixed(decimals) + unit + ' (' + deptName + ')';
+            }
+
+            if (summaryMax) { summaryMax.textContent = label(entry.max_temperature, '°C', 1); }
+            if (summaryMin) { summaryMin.textContent = label(entry.min_temperature, '°C', 1); }
+            if (summaryGust) { summaryGust.textContent = label(entry.max_gust, ' km/h', 0); }
+            if (summaryPrecip) { summaryPrecip.textContent = label(entry.max_precip, ' mm', 1); }
+            nationalSummaryBox.hidden = false;
+        }
+
         // --- Info-bulle au survol d'un département (nom, niveau de l'aléa
         // affiché, mini-frise de la journée sélectionnée) — indépendante du
         // clic, qui ouvre lui le panneau de détail complet.
@@ -645,8 +674,26 @@
             var anchorRect = anchorEl.getBoundingClientRect();
             var x = anchorRect.left + anchorRect.width / 2 - wrapRect.left;
             var y = anchorRect.top - wrapRect.top;
-            tooltip.style.left = Math.max(8, Math.min(x, wrapRect.width - 8)) + 'px';
+
+            // Le CSS applique translate(-50%, -100% - 10px) : le clamp
+            // précédent ne bornait que la propriété "left" elle-même, pas
+            // le décalage supplémentaire de moitié-largeur/hauteur que le
+            // transform applique ensuite — un département à l'extrême
+            // gauche de la carte (ex. Gironde) faisait ainsi déborder la
+            // bulle hors écran (left négatif, coupée). On mesure la taille
+            // réelle de la bulle (déjà remplie, juste rendue visible) pour
+            // borner sa boîte finale plutôt que son seul point d'ancrage.
+            tooltip.style.left = x + 'px';
             tooltip.style.top = Math.max(8, y) + 'px';
+            var halfWidth = tooltip.offsetWidth / 2;
+            var minX = halfWidth + 4;
+            var maxX = wrapRect.width - halfWidth - 4;
+            var clampedX = maxX >= minX ? Math.min(Math.max(x, minX), maxX) : wrapRect.width / 2;
+            tooltip.style.left = clampedX + 'px';
+
+            var tooltipHeight = tooltip.offsetHeight;
+            var minY = tooltipHeight + 14;
+            tooltip.style.top = Math.max(minY, y) + 'px';
         }
 
         function showDeptTooltip(code, anchorEl) {
@@ -714,8 +761,12 @@
                 tooltip.appendChild(miniLabels);
             }
 
-            positionTooltip(anchorEl);
+            // Rendre visible AVANT de positionner : positionTooltip() a
+            // besoin de mesurer la largeur/hauteur réelle de la bulle
+            // (offsetWidth/offsetHeight), qui valent 0 tant que l'élément
+            // est masqué via [hidden].
             tooltip.hidden = false;
+            positionTooltip(anchorEl);
         }
 
         function hideDeptTooltip() {
@@ -1013,6 +1064,7 @@
             buildHazardTabs();
             buildDayTabs();
             paintMap();
+            renderNationalSummary();
 
             if (manifest.run_time) {
                 var runDate = new Date(manifest.run_time);

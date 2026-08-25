@@ -53,6 +53,59 @@
     font-size: .85rem;
 }
 
+.hrw-header-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 14px;
+}
+
+.hrw-national-summary {
+    flex: 0 0 auto;
+    padding: 10px 14px;
+    border: 1px solid var(--hrw-border);
+    border-radius: 10px;
+    background: var(--hrw-panel);
+    min-width: 190px;
+}
+
+.hrw-national-summary-title {
+    margin: 0 0 6px;
+    font-size: .68rem;
+    font-weight: 800;
+    letter-spacing: .05em;
+    text-transform: uppercase;
+    color: var(--hrw-accent);
+}
+
+.hrw-national-summary dl {
+    margin: 0;
+    display: grid;
+    row-gap: 3px;
+}
+
+.hrw-national-summary dl > div {
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+}
+
+.hrw-national-summary dt {
+    font-size: .74rem;
+    color: var(--hrw-muted);
+    white-space: nowrap;
+}
+
+.hrw-national-summary dd {
+    margin: 0;
+    font-size: .78rem;
+    font-weight: 700;
+    color: var(--hrw-text);
+    text-align: right;
+    white-space: nowrap;
+}
+
 .hrw-search {
     position: relative;
     display: flex;
@@ -189,9 +242,9 @@
 }
 
 .hrw-tab.is-active {
-    background: var(--hrw-accent);
+    background: #e3f2fd;
     border-color: var(--hrw-accent);
-    color: #fff;
+    color: #0d47a1;
 }
 
 .hrw-fire-disclaimer {
@@ -311,38 +364,38 @@
     position: absolute;
     z-index: 30;
     transform: translate(-50%, calc(-100% - 10px));
-    padding: 8px 10px;
+    padding: 10px 13px;
     border: 1px solid var(--hrw-border);
-    border-radius: 8px;
+    border-radius: 9px;
     background: #ffffff;
     box-shadow: 0 8px 20px rgba(15, 23, 42, .18);
     pointer-events: none;
-    max-width: 220px;
+    max-width: 260px;
 }
 
 .hrw-tooltip-title {
-    font-size: .8rem;
+    font-size: .86rem;
     font-weight: 800;
     color: var(--hrw-text);
-    margin-bottom: 4px;
+    margin-bottom: 5px;
     white-space: nowrap;
 }
 
 .hrw-tooltip-chip {
     display: inline-block;
-    padding: 2px 7px;
+    padding: 3px 8px;
     border-radius: 6px;
-    font-size: .72rem;
+    font-size: .76rem;
     font-weight: 700;
     color: #1c1f26;
-    margin-bottom: 6px;
+    margin-bottom: 7px;
     white-space: nowrap;
 }
 
 .hrw-tooltip-frise {
     display: flex;
-    height: 14px;
-    width: 180px;
+    height: 16px;
+    width: 220px;
     border-radius: 4px;
     overflow: hidden;
     border: 1px solid var(--hrw-border);
@@ -355,15 +408,15 @@
 
 .hrw-tooltip-frise-labels {
     position: relative;
-    width: 180px;
-    height: 13px;
+    width: 220px;
+    height: 14px;
     margin-top: 2px;
 }
 
 .hrw-tooltip-frise-tick-abs {
     position: absolute;
     top: 0;
-    font-size: .62rem;
+    font-size: .68rem;
     color: var(--hrw-muted);
     white-space: nowrap;
 }
@@ -450,6 +503,11 @@
     background: var(--hrw-panel);
     border: 1px solid var(--hrw-border);
     cursor: pointer;
+    /* Hauteur stable quel que soit le nombre de lignes du libellé de
+       niveau (« Nul » vs « Risque de pluie verglaçante (2/3) ») : sinon
+       la grille — donc tout le panneau — changeait de hauteur en changeant
+       de département. */
+    min-height: 74px;
 }
 
 .hrw-hazard-cell.is-active {
@@ -504,10 +562,6 @@
     min-width: 3px;
 }
 
-.hrw-frise-hour[data-hrw-day-boundary] {
-    border-left: 1px solid rgba(15, 23, 42, .35);
-}
-
 .hrw-frise-labels {
     display: flex;
     margin-top: 4px;
@@ -550,6 +604,10 @@
     font-size: .86rem;
     color: var(--hrw-muted);
     line-height: 1.5;
+    /* Réserve la place du message + la phrase de vigilance renforcée
+       (ajoutée seulement pour les niveaux élevés) : sinon le panneau
+       changeait de hauteur selon le département sélectionné. */
+    min-height: 4.5em;
 }
 
 .hrw-footer {

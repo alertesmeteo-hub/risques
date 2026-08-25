@@ -43,7 +43,7 @@ except ImportError:  # pragma: no cover - Python < 3.9 non pris en charge ici
 
 
 LOGGER = logging.getLogger("risques")
-PIPELINE_VERSION = "2.2.0"
+PIPELINE_VERSION = "2.3.0"
 PARIS_TZ = ZoneInfo("Europe/Paris") if ZoneInfo is not None else timezone.utc
 
 DEFAULT_HARMONIE_BASE_URL = (
@@ -93,26 +93,36 @@ _RAMP_7 = [
     "#e8f5e9", "#c5e1a5", "#fff59d",
     "#ffe082", "#ffb74d", "#e57373", "#ce93d8",
 ]
+_RAMP_8 = [
+    "#e8f5e9", "#c5e1a5", "#fff59d", "#ffe082",
+    "#ffb74d", "#ff8a65", "#e57373", "#ce93d8",
+]
 _RAMP_4 = ["#e8f5e9", "#fff59d", "#ffb74d", "#ce93d8"]
 
-# Libellés génériques pour les 6 paliers des aléas à seuils numériques
-# (chaleur/pluie/vent/froid/neige) — le nom du palier PLUS le seuil réel
-# qu'il représente, pour que la légende affiche directement la valeur
-# plutôt qu'un mot vague seul (demandé explicitement).
+# Libellés pour les paliers des aléas à seuils numériques (chaleur/pluie/
+# vent/froid/neige). Pour vent/pluie/chaleur, le mot générique (« Faible »,
+# « Modéré »...) a été retiré sur demande explicite : le libellé est
+# uniquement le seuil chiffré, ex. « (≥ 80 km/h) ». Froid/Neige gardent le
+# mot + seuil (non concernés par ce changement).
 _TIERS_6 = ["Faible", "Modéré", "Marqué", "Fort", "Très fort", "Extrême"]
 
 
-def _numeric_tier_labels(thresholds: tuple[float, ...], unit: str, below: bool = False) -> list[str]:
-    """« Nul », puis un libellé par seuil : « Faible (≥ 28°C) », etc.
-    ``thresholds`` doit avoir exactement len(_TIERS_6) éléments, dans le
-    même ordre que celui attendu par _threshold_level/_threshold_level_below
-    (ascendant, ou descendant si ``below``)."""
+def _numeric_tier_labels(
+    thresholds: tuple[float, ...], unit: str, below: bool = False, bare: bool = False
+) -> list[str]:
+    """« Nul », puis un libellé par seuil : « Faible (≥ 28°C) » (ou juste
+    « (≥ 28°C) » si ``bare``), etc. ``below`` inverse le comparateur pour un
+    aléa qui s'aggrave quand la valeur diminue (froid)."""
 
     comparator = "≤" if below else "≥"
     labels = ["Nul"]
-    for name, threshold in zip(_TIERS_6, thresholds):
+    for index, threshold in enumerate(thresholds):
         value = f"{threshold:g}"
-        labels.append(f"{name} ({comparator} {value} {unit})")
+        criterion = f"({comparator} {value} {unit})"
+        if bare:
+            labels.append(criterion)
+        else:
+            labels.append(f"{_TIERS_6[index]} {criterion}")
     return labels
 
 
@@ -147,6 +157,8 @@ def _ramp_for(level_count: int) -> list[str]:
         return _RAMP_5
     if level_count == 7:
         return _RAMP_7
+    if level_count == 8:
+        return _RAMP_8
     if level_count == 4:
         return _RAMP_4
     raise ValueError(f"Pas de rampe de couleurs définie pour {level_count} paliers")
@@ -355,30 +367,41 @@ def _threshold_level_below(value: float, thresholds: tuple[float, ...]) -> int:
 
 
 # Seuils numériques (ascendants) fournis explicitement pour chaque aléa —
-# le nombre de valeurs fixe le nombre de paliers (6 seuils -> 6 paliers +
-# Nul = 7 niveaux, 0 à 6). ``_threshold_level`` incrémente le niveau à
-# chaque seuil atteint ou dépassé, donc ces tuples doivent rester en ordre
-# croissant. Le palier le plus bas initialement fourni (ex. 25°C pour
-# Chaleur, 15mm pour Pluie) a été fondu dans Nul : demandé explicitement
-# (6 paliers, pas 7) après une première version à 7 seuils.
-CHALEUR_THRESHOLDS = (28.0, 31.0, 34.0, 37.0, 40.0, 45.0)
-PLUIE_THRESHOLDS_MM = (30.0, 50.0, 80.0, 150.0, 300.0, 500.0)
-VENT_THRESHOLDS_KMH = (90.0, 100.0, 110.0, 130.0, 150.0, 180.0)
+# le nombre de valeurs fixe le nombre de paliers. ``_threshold_level``
+# incrémente le niveau à chaque seuil atteint ou dépassé, donc ces tuples
+# doivent rester en ordre croissant. Chaleur/Pluie/Vent sont revenus à 7
+# seuils (dont Pluie avec un nouveau palier bas à 5mm) après une version
+# intermédiaire à 6 ; Froid/Neige restent à 6, non concernés par ce
+# dernier ajustement.
+CHALEUR_THRESHOLDS = (25.0, 28.0, 31.0, 34.0, 37.0, 40.0, 45.0)
+PLUIE_THRESHOLDS_MM = (5.0, 15.0, 30.0, 50.0, 80.0, 150.0, 300.0)
+VENT_THRESHOLDS_KMH = (80.0, 90.0, 100.0, 110.0, 130.0, 150.0, 180.0)
 NEIGE_THRESHOLDS_CM = (1.0, 3.0, 7.0, 15.0, 30.0, 50.0)
 # ``_threshold_level_below`` a besoin de l'ordre inverse (du seuil le plus
 # « chaud »/le moins sévère au plus froid) — cf. sa docstring.
 FROID_THRESHOLDS_BELOW = (-3.0, -6.0, -10.0, -15.0, -20.0, -30.0)
 
-# Les libellés de légende intègrent directement le seuil réel (ex.
-# « Faible (≥ 28°C) ») plutôt qu'un mot seul — demandé explicitement,
-# « qu'il faut mettre en légende ». Complète les entrées vides laissées
-# dans HAZARD_LEVELS plus haut (qui doivent rester en phase avec ces
-# constantes plutôt que dupliquer les seuils à deux endroits).
-HAZARD_LEVELS["chaleur"] = _numeric_tier_labels(CHALEUR_THRESHOLDS, "°C")
-HAZARD_LEVELS["pluie_inondation"] = _numeric_tier_labels(PLUIE_THRESHOLDS_MM, "mm")
-HAZARD_LEVELS["vent"] = _numeric_tier_labels(VENT_THRESHOLDS_KMH, "km/h")
+# Les libellés de légende intègrent directement le seuil réel plutôt qu'un
+# mot seul — demandé explicitement, « qu'il faut mettre en légende ».
+# Chaleur/Pluie/Vent : uniquement le seuil, sans mot générique (``bare``).
+# Complète les entrées vides laissées dans HAZARD_LEVELS plus haut (qui
+# doivent rester en phase avec ces constantes plutôt que dupliquer les
+# seuils à deux endroits).
+HAZARD_LEVELS["chaleur"] = _numeric_tier_labels(CHALEUR_THRESHOLDS, "°C", bare=True)
+HAZARD_LEVELS["pluie_inondation"] = _numeric_tier_labels(PLUIE_THRESHOLDS_MM, "mm", bare=True)
+HAZARD_LEVELS["vent"] = _numeric_tier_labels(VENT_THRESHOLDS_KMH, "km/h", bare=True)
 HAZARD_LEVELS["neige"] = _numeric_tier_labels(NEIGE_THRESHOLDS_CM, "cm")
 HAZARD_LEVELS["froid"] = _numeric_tier_labels(FROID_THRESHOLDS_BELOW, "°C", below=True)
+
+
+def _safe_max(values: np.ndarray) -> float:
+    finite = values[np.isfinite(values)] if values.size else values
+    return float(np.max(finite)) if finite.size else float("nan")
+
+
+def _safe_min(values: np.ndarray) -> float:
+    finite = values[np.isfinite(values)] if values.size else values
+    return float(np.min(finite)) if finite.size else float("nan")
 
 
 def hourly_hazard_levels(
@@ -387,8 +410,10 @@ def hourly_hazard_levels(
     cumulative_precip_mm: float,
     day_precip_mm: float,
     day_snow_cm: float,
-) -> dict[str, int]:
-    """Niveau de chaque aléa pour un département, à une échéance donnée.
+) -> tuple[dict[str, int], dict[str, float]]:
+    """Niveau de chaque aléa (dict) + valeurs brutes record de l'heure
+    (2e dict : max/min réels, pas le perçentile utilisé pour les niveaux)
+    pour un département, à une échéance donnée.
 
     ``cumulative_precip_mm`` ne se réinitialise jamais (utilisé par Feu,
     proxy de sécheresse récente) ; ``day_precip_mm``/``day_snow_cm`` sont
@@ -407,6 +432,16 @@ def hourly_hazard_levels(
     wind_gust = col("wind_gust_kmh")
     visibility = col("visibility_km")
     precipitation_now = col("precipitation_mm")
+
+    # Valeurs brutes (max/min réels, pas le perçentile) pour le résumé
+    # national « records du jour » — objectif différent du niveau d'alerte
+    # (qui doit rester insensible à un point isolé), ici on veut justement
+    # la valeur la plus extrême relevée quelque part.
+    raw_extremes = {
+        "max_temperature": _safe_max(temperature),
+        "min_temperature": _safe_min(temperature),
+        "max_gust": _safe_max(wind_gust),
+    }
 
     # Perçentiles plutôt que max/min strict : même correction que pour les
     # aléas à code de risque (cf. _nanpercentile_high) — une seule commune
@@ -454,7 +489,7 @@ def hourly_hazard_levels(
     if not np.isfinite(precip_now_repr) or precip_now_repr < 0.1:
         grele_level = 0
 
-    return {
+    hazards = {
         "orages": _risk_column_level(col("thunder_risk_code")),
         "grele": grele_level,
         # Cumul de pluie du jour (mm), pas un code instantané : le niveau à
@@ -471,11 +506,20 @@ def hourly_hazard_levels(
         "brouillard": _threshold_level_below(min_visibility, (1.0, 0.5, 0.2, 0.1)),
         "feu": int(min(4, fire_score)),
     }
+    return hazards, raw_extremes
 
 
 def build_department_risk(
     series: DepartmentSeries, day_count: int, today: date
-) -> dict[str, Any] | None:
+) -> tuple[dict[str, Any], dict[str, dict[str, float]]] | None:
+    """Renvoie (objet publiable {daily, hourly}, records bruts par jour).
+
+    Le 2e élément (``{date: {max_temperature, min_temperature, max_gust,
+    total_precip_mm}}``) n'est PAS publié tel quel dans risques.json (pas de
+    valeurs brutes par département, seulement des niveaux) — il sert juste
+    à ``build_risques`` à calculer le résumé national (records du jour,
+    département par département)."""
+
     if not series.times:
         return None
 
@@ -492,6 +536,7 @@ def build_department_risk(
     running_day_snow = 0.0
     current_local_date: str | None = None
     hourly: list[dict[str, Any]] = []
+    raw_by_date: dict[str, dict[str, float]] = {}
     for step_index, valid_time in enumerate(series.times):
         local_date = valid_time.astimezone(PARIS_TZ).date().isoformat()
         if local_date != current_local_date:
@@ -510,7 +555,7 @@ def build_department_risk(
         snow_repr = _nanpercentile_high(snow_fresh) if snow_fresh.size else float("nan")
         running_day_snow += snow_repr if np.isfinite(snow_repr) else 0.0
 
-        levels = hourly_hazard_levels(
+        levels, raw = hourly_hazard_levels(
             series, step_index, running_precip, running_day_precip, running_day_snow
         )
         hourly.append(
@@ -521,6 +566,21 @@ def build_department_risk(
                 "hazards": levels,
             }
         )
+
+        day_raw = raw_by_date.setdefault(
+            local_date,
+            {"max_temperature": float("-inf"), "min_temperature": float("inf"), "max_gust": float("-inf")},
+        )
+        if np.isfinite(raw["max_temperature"]):
+            day_raw["max_temperature"] = max(day_raw["max_temperature"], raw["max_temperature"])
+        if np.isfinite(raw["min_temperature"]):
+            day_raw["min_temperature"] = min(day_raw["min_temperature"], raw["min_temperature"])
+        if np.isfinite(raw["max_gust"]):
+            day_raw["max_gust"] = max(day_raw["max_gust"], raw["max_gust"])
+        # Le cumul du jour ne fait qu'augmenter (remis à 0 à chaque
+        # changement de date) : sa valeur à la dernière heure du jour EST
+        # le total du jour.
+        day_raw["total_precip_mm"] = running_day_precip
 
     # Regroupement par journée calendaire Europe/Paris.
     days: dict[str, list[dict[str, Any]]] = {}
@@ -554,7 +614,7 @@ def build_department_risk(
             )
         daily.append({"date": date_str, "hazards": day_levels})
 
-    return {"daily": daily, "hourly": hourly}
+    return {"daily": daily, "hourly": hourly}, raw_by_date
 
 
 def department_display_name(series: DepartmentSeries) -> str | None:
@@ -592,6 +652,10 @@ def build_risques(
 
     today = datetime.now(PARIS_TZ).date()
     departments: dict[str, Any] = {}
+    # {date: {field: (best_value, department_code)}} — alimenté au fil des
+    # départements pour calculer le résumé national (records du jour, avec
+    # le département qui les détient) sans tout garder en mémoire deux fois.
+    national_by_date: dict[str, dict[str, tuple[float, str]]] = {}
     run_time: datetime | None = None
     missing = 0
     for code in department_codes():
@@ -599,11 +663,27 @@ def build_risques(
         if series is None:
             missing += 1
             continue
-        risk = build_department_risk(series, day_count, today)
-        if risk is None:
+        result = build_department_risk(series, day_count, today)
+        if result is None:
             missing += 1
             continue
+        risk, raw_by_date = result
         departments[code] = risk
+        for date_str, raw in raw_by_date.items():
+            slot = national_by_date.setdefault(date_str, {})
+
+            def consider(field: str, value: float, better: Any) -> None:
+                if not np.isfinite(value):
+                    return
+                current = slot.get(field)
+                if current is None or better(value, current[0]):
+                    slot[field] = (value, code)
+
+            consider("max_temperature", raw["max_temperature"], lambda new, best: new > best)
+            consider("min_temperature", raw["min_temperature"], lambda new, best: new < best)
+            consider("max_gust", raw["max_gust"], lambda new, best: new > best)
+            consider("total_precip_mm", raw["total_precip_mm"], lambda new, best: new > best)
+
         if run_time is None and series.times:
             run_time = series.times[0]
         LOGGER.info("Département %s : %s échéances traitées", code, len(series.times))
@@ -618,6 +698,34 @@ def build_risques(
         raise RuntimeError(
             f"Trop de départements manquants ({len(departments)}/96) — "
             "le hub harmonie n'est probablement pas encore à jour."
+        )
+
+    # Résumé national par jour : maxi/mini de température, rafale maxi,
+    # cumul de pluie maxi, chacun avec le département qui le détient — le
+    # plugin résout le code en nom via sa table de départements déjà
+    # nécessaire pour l'affichage de la carte.
+    ordered_dates = [
+        (today + timedelta(days=offset)).isoformat() for offset in range(day_count)
+    ]
+    national_summary = []
+    for date_str in ordered_dates:
+        slot = national_by_date.get(date_str, {})
+
+        def field(name: str) -> dict[str, Any] | None:
+            entry = slot.get(name)
+            if entry is None:
+                return None
+            value, department = entry
+            return {"value": round(value, 1), "department": department}
+
+        national_summary.append(
+            {
+                "date": date_str,
+                "max_temperature": field("max_temperature"),
+                "min_temperature": field("min_temperature"),
+                "max_gust": field("max_gust"),
+                "max_precip": field("total_precip_mm"),
+            }
         )
 
     manifest = {
@@ -637,6 +745,7 @@ def build_risques(
         "hazards": HAZARD_LABELS,
         "hazard_levels": hazard_levels_manifest(),
         "fire_disclaimer": FIRE_DISCLAIMER,
+        "national_summary": national_summary,
         "departments": departments,
     }
     return manifest, run_time
