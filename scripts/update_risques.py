@@ -43,7 +43,7 @@ except ImportError:  # pragma: no cover - Python < 3.9 non pris en charge ici
 
 
 LOGGER = logging.getLogger("risques")
-PIPELINE_VERSION = "2.9.0"
+PIPELINE_VERSION = "2.10.0"
 PARIS_TZ = ZoneInfo("Europe/Paris") if ZoneInfo is not None else timezone.utc
 
 DEFAULT_HARMONIE_BASE_URL = (
@@ -422,11 +422,11 @@ def _nanpercentile_low(values: np.ndarray, percentile: float = 10.0) -> float:
     return float(np.percentile(finite, percentile)) if finite.size else float("nan")
 
 
-def _risk_column_level(values: np.ndarray, cap: int = 4) -> int:
+def _risk_column_level(values: np.ndarray, cap: int = 4, percentile: float = 90.0) -> int:
     finite = values[np.isfinite(values)] if values.size else values
     if not finite.size:
         return 0
-    return int(min(cap, max(0, round(_nanpercentile_high(values)))))
+    return int(min(cap, max(0, round(_nanpercentile_high(values, percentile)))))
 
 
 def _threshold_level(value: float, thresholds: tuple[float, ...]) -> int:
@@ -569,6 +569,21 @@ def hourly_hazard_levels(
     min_visibility = _nanpercentile_low(visibility)
     precip_now_repr = _nanpercentile_high(precipitation_now)
 
+    # Brouillard : la visibilité seule ne suffit pas à distinguer un vrai
+    # brouillard (air saturé, calme) d'une simple visibilité réduite par la
+    # pluie, la neige ou la poussière — et le brouillard radiatif classique
+    # est un phénomène de demi-saison froide, rare en plein été hors
+    # brouillard côtier d'advection.
+    dewpoint = col("dewpoint_c")
+    dewpoint_spread = temperature - dewpoint
+    fog_humidity = _nanpercentile_high(humidity)
+    fog_spread = _nanpercentile_low(dewpoint_spread)
+    fog_month = (
+        series.times[step_index].astimezone(PARIS_TZ).month
+        if step_index < len(series.times)
+        else None
+    )
+
     # Résumé national « records du jour » : mêmes valeurs perçentile que les
     # niveaux d'alerte ci-dessus, pas le max/min brut d'un point isolé.
     # Constaté en production : un point de grille au cisaillement extrême
@@ -612,12 +627,42 @@ def hourly_hazard_levels(
     # (la grêle est une forme de précipitation convective) — un code de
     # risque non nul sans pluie mesurable à cette heure est ignoré plutôt
     # que reporté tel quel.
-    grele_level = _risk_column_level(col("hail_risk_code"))
+    # Orages/grêle : perçentile plus bas (75e, contre 90e pour le reste) —
+    # contrairement à une canicule ou un coup de froid, qui couvrent tout un
+    # département de façon à peu près uniforme, un orage est par nature une
+    # cellule étroite. Le 90e centile, pensé pour éviter qu'UN point isolé
+    # ne fasse basculer tout le département (bug constaté : 58% de la
+    # France en Orages « Sévère » le même jour), s'est révélé trop strict
+    # dans l'autre sens : un département entier repassait « Nul » alors que
+    # ses voisins immédiats étaient classés « Intense/Violent » à cause
+    # d'une cellule ayant balayé une fraction bien réelle mais minoritaire
+    # de son territoire — Météo-France elle-même classe tout un département
+    # dès qu'une cellule orageuse localisée mais réelle le traverse.
+    orages_level = _risk_column_level(col("thunder_risk_code"), percentile=75.0)
+    grele_level = _risk_column_level(col("hail_risk_code"), percentile=75.0)
     if not np.isfinite(precip_now_repr) or precip_now_repr < 0.1:
         grele_level = 0
 
+    fog_level = _threshold_level_below(min_visibility, (1.0, 0.5, 0.2, 0.1))
+    if fog_level > 0:
+        is_saturated = (
+            np.isfinite(fog_humidity) and fog_humidity >= 92.0
+        ) or (np.isfinite(fog_spread) and fog_spread <= 2.0)
+        is_calm = np.isfinite(max_wind) and max_wind <= 15.0
+        if not (is_saturated and is_calm):
+            # Visibilité basse sans air saturé ni calme plat : ce n'est pas
+            # du brouillard (pluie forte, neige, poussière...).
+            fog_level = 0
+        elif fog_month in (6, 7, 8) and not (
+            np.isfinite(fog_humidity) and fog_humidity >= 97.0 and max_wind <= 8.0
+        ):
+            # Juin-août : le brouillard radiatif classique est rare (hors
+            # brouillard côtier d'advection) — signal exigé plus net,
+            # sinon plafonné à Faible.
+            fog_level = min(fog_level, 1)
+
     hazards = {
-        "orages": _risk_column_level(col("thunder_risk_code")),
+        "orages": orages_level,
         "grele": grele_level,
         # Cumul de pluie du jour (mm), pas un code instantané : le niveau à
         # une heure donnée reflète le cumul depuis minuit jusqu'à cette
@@ -630,7 +675,7 @@ def hourly_hazard_levels(
         "verglas": _risk_column_level(col("snow_stick_risk_code"), cap=3),
         "chaleur": _threshold_level(max_temperature, CHALEUR_THRESHOLDS),
         "froid": _threshold_level_below(min_temperature, FROID_THRESHOLDS_BELOW),
-        "brouillard": _threshold_level_below(min_visibility, (1.0, 0.5, 0.2, 0.1)),
+        "brouillard": fog_level,
         "feu": fire_level,
     }
     return hazards, raw_extremes
