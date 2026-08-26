@@ -43,7 +43,7 @@ except ImportError:  # pragma: no cover - Python < 3.9 non pris en charge ici
 
 
 LOGGER = logging.getLogger("risques")
-PIPELINE_VERSION = "2.8.1"
+PIPELINE_VERSION = "2.9.0"
 PARIS_TZ = ZoneInfo("Europe/Paris") if ZoneInfo is not None else timezone.utc
 
 DEFAULT_HARMONIE_BASE_URL = (
@@ -85,23 +85,64 @@ HAZARD_LABELS = {
 # refléter des critères réels (ex. cumul de pluie en mm, rafales en km/h)
 # plutôt qu'un simple code générique. Le palier 0 est toujours « Nul ».
 #
-# Rampe de couleurs pastel commune à toutes les échelles (vert → jaune →
-# orange → rouge → violet), seule la longueur varie selon le nombre de
-# paliers de l'aléa.
-_RAMP_5 = ["#e8f5e9", "#a5d6a7", "#fff59d", "#ffcc80", "#ce93d8"]
-_RAMP_7 = [
-    "#e8f5e9", "#c5e1a5", "#fff59d",
-    "#ffe082", "#ffb74d", "#e57373", "#ce93d8",
-]
-_RAMP_8 = [
-    "#e8f5e9", "#c5e1a5", "#fff59d", "#ffe082",
-    "#ffb74d", "#ff8a65", "#e57373", "#ce93d8",
-]
-_RAMP_9 = [
-    "#e8f5e9", "#c5e1a5", "#a5d6a7", "#fff59d", "#ffe082",
-    "#ffb74d", "#ff8a65", "#e57373", "#ce93d8",
-]
-_RAMP_4 = ["#e8f5e9", "#fff59d", "#ffb74d", "#ce93d8"]
+# Couleurs officielles de la vigilance Météo-France, relevées directement
+# sur les remplissages SVG de la carte en production (vigilance.meteofrance.fr) :
+# vert #31aa35, jaune #fff600, orange #ffb82b (confirmés aussi via la charte
+# des pictogrammes « comportements à adopter » du même site) ; rouge #cc0000
+# (non présent sur la carte au moment du relevé faute de département classé
+# rouge ce jour-là, mais confirmé via cette même charte). Météo-France
+# s'arrête à 4 couleurs — le palier « Extrême » (violet) au-delà du rouge est
+# propre à ce projet, sans équivalent officiel.
+_VIGILANCE_VERT = "#31aa35"
+_VIGILANCE_JAUNE = "#fff600"
+_VIGILANCE_ORANGE = "#ffb82b"
+_VIGILANCE_ROUGE = "#cc0000"
+_VIGILANCE_EXTREME = "#7b1fa2"
+
+_ANCHORS_OFFICIELS = [_VIGILANCE_VERT, _VIGILANCE_JAUNE, _VIGILANCE_ORANGE, _VIGILANCE_ROUGE]
+_ANCHORS_AVEC_EXTREME = _ANCHORS_OFFICIELS + [_VIGILANCE_EXTREME]
+
+
+def _hex_to_rgb(color: str) -> tuple[int, int, int]:
+    color = color.lstrip("#")
+    return tuple(int(color[i : i + 2], 16) for i in (0, 2, 4))  # type: ignore[return-value]
+
+
+def _rgb_to_hex(rgb: tuple[float, float, float]) -> str:
+    return "#" + "".join(f"{round(max(0.0, min(255.0, c))):02x}" for c in rgb)
+
+
+def _interpolate_ramp(anchors: list[str], count: int) -> list[str]:
+    """Répartit ``count`` couleurs le long de la séquence ``anchors``
+    (vert → ... → violet), interpolées linéairement entre les points
+    d'ancrage les plus proches. Quand ``count`` égale le nombre d'ancres
+    (4 ou 5 paliers), chaque couleur retombe exactement sur une teinte
+    officielle ; au-delà, les teintes intermédiaires sont dégradées entre
+    les mêmes ancres plutôt que redéfinies au hasard."""
+
+    if count == 1:
+        return [anchors[0]]
+    anchor_rgbs = [_hex_to_rgb(color) for color in anchors]
+    ramp = []
+    for index in range(count):
+        position = index * (len(anchors) - 1) / (count - 1)
+        lower = int(position)
+        upper = min(lower + 1, len(anchors) - 1)
+        fraction = position - lower
+        rgb = tuple(
+            anchor_rgbs[lower][channel]
+            + (anchor_rgbs[upper][channel] - anchor_rgbs[lower][channel]) * fraction
+            for channel in range(3)
+        )
+        ramp.append(_rgb_to_hex(rgb))
+    return ramp
+
+
+_RAMP_4 = _interpolate_ramp(_ANCHORS_OFFICIELS, 4)
+_RAMP_5 = _interpolate_ramp(_ANCHORS_AVEC_EXTREME, 5)
+_RAMP_7 = _interpolate_ramp(_ANCHORS_AVEC_EXTREME, 7)
+_RAMP_8 = _interpolate_ramp(_ANCHORS_AVEC_EXTREME, 8)
+_RAMP_9 = _interpolate_ramp(_ANCHORS_AVEC_EXTREME, 9)
 
 # Libellés pour les paliers des aléas à seuils numériques (chaleur/pluie/
 # vent/froid/neige). Pour vent/pluie/chaleur, le mot générique (« Faible »,
@@ -170,15 +211,31 @@ def _ramp_for(level_count: int) -> list[str]:
     raise ValueError(f"Pas de rampe de couleurs définie pour {level_count} paliers")
 
 
+def _readable_text_color(background_hex: str) -> str:
+    """Texte clair ou sombre selon la luminance du fond (formule YIQ) —
+    les teintes officielles vert/rouge/violet sont bien plus saturées que
+    l'ancienne rampe pastel, un texte foncé fixe y devenait illisible sur
+    les paliers rouge/extrême."""
+
+    r, g, b = _hex_to_rgb(background_hex)
+    yiq = (r * 299 + g * 587 + b * 114) / 1000
+    return "#1c1f26" if yiq >= 150 else "#ffffff"
+
+
 def hazard_levels_manifest() -> dict[str, dict[str, dict[str, str]]]:
-    """Construit la section ``hazard_levels`` de risques.json : libellé et
-    couleur pour chaque palier de chaque aléa, à partir de HAZARD_LEVELS."""
+    """Construit la section ``hazard_levels`` de risques.json : libellé,
+    couleur et couleur de texte lisible pour chaque palier de chaque aléa,
+    à partir de HAZARD_LEVELS."""
 
     manifest: dict[str, dict[str, dict[str, str]]] = {}
     for hazard, labels in HAZARD_LEVELS.items():
         ramp = _ramp_for(len(labels))
         manifest[hazard] = {
-            str(level): {"label": label, "color": ramp[level]}
+            str(level): {
+                "label": label,
+                "color": ramp[level],
+                "text_color": _readable_text_color(ramp[level]),
+            }
             for level, label in enumerate(labels)
         }
     return manifest
