@@ -43,7 +43,7 @@ except ImportError:  # pragma: no cover - Python < 3.9 non pris en charge ici
 
 
 LOGGER = logging.getLogger("risques")
-PIPELINE_VERSION = "2.7.0"
+PIPELINE_VERSION = "2.8.1"
 PARIS_TZ = ZoneInfo("Europe/Paris") if ZoneInfo is not None else timezone.utc
 
 DEFAULT_HARMONIE_BASE_URL = (
@@ -213,8 +213,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--days",
         type=int,
-        default=3,
-        help="Nombre de journées calendaires à conserver (J, J+1, J+2...)",
+        default=2,
+        help=(
+            "Nombre de journées calendaires à conserver (J, J+1...) — "
+            "limité à 2 par défaut : avec une prévision HARMONIE de 48h, "
+            "J+2 n'a jamais que quelques heures de données réelles (tôt le "
+            "matin), donnant une carte quasi vide pour ce jour-là."
+        ),
     )
     parser.add_argument(
         "--current-metadata-url",
@@ -434,16 +439,6 @@ HAZARD_LEVELS["chaleur"] = ["Nul"] + [
 ]
 
 
-def _safe_max(values: np.ndarray) -> float:
-    finite = values[np.isfinite(values)] if values.size else values
-    return float(np.max(finite)) if finite.size else float("nan")
-
-
-def _safe_min(values: np.ndarray) -> float:
-    finite = values[np.isfinite(values)] if values.size else values
-    return float(np.min(finite)) if finite.size else float("nan")
-
-
 # Altitude au-delà de laquelle un point de grille est exclu de certains
 # calculs : un sommet ou un col en très haute montagne n'est représentatif
 # d'aucune zone habitée, et produit des valeurs extrêmes mais non
@@ -506,17 +501,6 @@ def hourly_hazard_levels(
     wind_gust_populated = _filtered_by_altitude(wind_gust, series.altitudes, VENT_MAX_ALTITUDE_M)
     temperature_populated_low = _filtered_by_altitude(temperature, series.altitudes, GEL_MAX_ALTITUDE_M)
 
-    # Valeurs brutes (max/min réels, pas le perçentile) pour le résumé
-    # national « records du jour » — objectif différent du niveau d'alerte
-    # (qui doit rester insensible à un point isolé), ici on veut justement
-    # la valeur la plus extrême relevée quelque part (parmi les points
-    # retenus après filtre d'altitude pour rafale/gel).
-    raw_extremes = {
-        "max_temperature": _safe_max(temperature),
-        "min_temperature": _safe_min(temperature_populated_low),
-        "max_gust": _safe_max(wind_gust_populated),
-    }
-
     # Perçentiles plutôt que max/min strict : même correction que pour les
     # aléas à code de risque (cf. _nanpercentile_high) — une seule commune
     # ne doit pas suffire à faire basculer tout le département.
@@ -527,6 +511,19 @@ def hourly_hazard_levels(
     max_gust = _nanpercentile_high(wind_gust_populated)
     min_visibility = _nanpercentile_low(visibility)
     precip_now_repr = _nanpercentile_high(precipitation_now)
+
+    # Résumé national « records du jour » : mêmes valeurs perçentile que les
+    # niveaux d'alerte ci-dessus, pas le max/min brut d'un point isolé.
+    # Constaté en production : un point de grille au cisaillement extrême
+    # donnait 145 km/h de rafale « record national » en Côte-d'Or alors que
+    # le niveau Vent affiché pour ce même département n'était que 2/7 (seuil
+    # 90 km/h) — un même département affichant deux valeurs incohérentes
+    # entre elles selon l'endroit de la page.
+    raw_extremes = {
+        "max_temperature": max_temperature,
+        "min_temperature": min_temperature,
+        "max_gust": max_gust,
+    }
 
     # Cocktail feu : chaleur, air sec ET vent doivent être réunis
     # SIMULTANÉMENT — un seul facteur seul ne doit jamais suffire (constaté
