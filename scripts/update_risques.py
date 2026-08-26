@@ -43,7 +43,7 @@ except ImportError:  # pragma: no cover - Python < 3.9 non pris en charge ici
 
 
 LOGGER = logging.getLogger("risques")
-PIPELINE_VERSION = "2.10.0"
+PIPELINE_VERSION = "2.11.0"
 PARIS_TZ = ZoneInfo("Europe/Paris") if ZoneInfo is not None else timezone.utc
 
 DEFAULT_HARMONIE_BASE_URL = (
@@ -429,6 +429,38 @@ def _risk_column_level(values: np.ndarray, cap: int = 4, percentile: float = 90.
     return int(min(cap, max(0, round(_nanpercentile_high(values, percentile)))))
 
 
+def _localized_risk_level(
+    values: np.ndarray, cap: int = 4, min_points: int = 5, min_fraction: float = 0.03
+) -> int:
+    """Pour orages/grêle : phénomènes intrinsèquement localisés, pas
+    étalés uniformément sur tout un département comme une canicule ou un
+    coup de froid — un perçentile (même abaissé à 75) exige qu'au moins
+    25% du département soit touché, ce qui s'est révélé encore trop
+    strict en production : la Seine-et-Marne restait « Nul » alors que
+    16% de ses points de grille atteignaient « Marqué/Fort » ou plus (7
+    points sur 202 en « Intense/Violent »), entourée de tous côtés par des
+    départements classés — Météo-France elle-même déclenche une vigilance
+    département entier dès qu'une cellule confirmée le traverse, sans
+    exiger qu'une fraction donnée du territoire soit couverte.
+
+    Ici, un niveau compte pour le département dès qu'au moins
+    ``min_points`` points (ou ``min_fraction`` du total, le plus grand des
+    deux) l'atteignent — un plancher fixe, donc insensible à 1-2 points
+    isolés (le bug d'origine : un seul point aberrant faisait basculer
+    58% des départements en « Sévère » le même jour), tout en reconnaissant
+    une cellule orageuse réelle dès qu'elle couvre une fraction minoritaire
+    mais substantielle du territoire."""
+
+    finite = values[np.isfinite(values)] if values.size else values
+    if not finite.size:
+        return 0
+    threshold_count = max(min_points, int(np.ceil(finite.size * min_fraction)))
+    for candidate in range(cap, 0, -1):
+        if int(np.sum(finite >= candidate)) >= threshold_count:
+            return candidate
+    return 0
+
+
 def _threshold_level(value: float, thresholds: tuple[float, ...]) -> int:
     """Paliers croissants : renvoie le niveau (0 à len(thresholds)) atteint
     par ``value``. ``thresholds`` doit être trié en ordre croissant."""
@@ -623,23 +655,14 @@ def hourly_hazard_levels(
         if step_index >= 24 and cumulative_precip_mm < 1.0:
             fire_level = min(4, fire_level + 1)
 
+    # Orages/grêle : seuil par nombre de points plutôt que perçentile —
+    # cf. _localized_risk_level (phénomènes intrinsèquement localisés).
+    orages_level = _localized_risk_level(col("thunder_risk_code"))
+    grele_level = _localized_risk_level(col("hail_risk_code"))
     # Grêle : météorologiquement impossible sans précipitation en cours
     # (la grêle est une forme de précipitation convective) — un code de
     # risque non nul sans pluie mesurable à cette heure est ignoré plutôt
     # que reporté tel quel.
-    # Orages/grêle : perçentile plus bas (75e, contre 90e pour le reste) —
-    # contrairement à une canicule ou un coup de froid, qui couvrent tout un
-    # département de façon à peu près uniforme, un orage est par nature une
-    # cellule étroite. Le 90e centile, pensé pour éviter qu'UN point isolé
-    # ne fasse basculer tout le département (bug constaté : 58% de la
-    # France en Orages « Sévère » le même jour), s'est révélé trop strict
-    # dans l'autre sens : un département entier repassait « Nul » alors que
-    # ses voisins immédiats étaient classés « Intense/Violent » à cause
-    # d'une cellule ayant balayé une fraction bien réelle mais minoritaire
-    # de son territoire — Météo-France elle-même classe tout un département
-    # dès qu'une cellule orageuse localisée mais réelle le traverse.
-    orages_level = _risk_column_level(col("thunder_risk_code"), percentile=75.0)
-    grele_level = _risk_column_level(col("hail_risk_code"), percentile=75.0)
     if not np.isfinite(precip_now_repr) or precip_now_repr < 0.1:
         grele_level = 0
 
