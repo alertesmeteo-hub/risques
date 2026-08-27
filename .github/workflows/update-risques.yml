@@ -8,9 +8,10 @@ on:
         type: boolean
         default: false
   schedule:
-    # Décalé par rapport au cron HARMONIE (27 */6 * * *) pour lui laisser le
-    # temps de publier — mais un run vérifie d'abord si le run source a déjà
-    # été traité (via --current-metadata-url) avant de faire le travail, donc
+    # Calé à :50, après le passage HARMONIE à :10 (lui aussi horaire depuis
+    # peu, contre toutes les 6h avant), pour lui laisser le temps de
+    # publier — mais un run vérifie d'abord si le run source a déjà été
+    # traité (via --current-metadata-url) avant de faire le travail, donc
     # une fréquence horaire ne coûte quasi rien la plupart du temps.
     - cron: "50 * * * *"
 
