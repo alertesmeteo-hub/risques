@@ -43,8 +43,19 @@ except ImportError:  # pragma: no cover - Python < 3.9 non pris en charge ici
 
 
 LOGGER = logging.getLogger("risques")
-PIPELINE_VERSION = "2.11.0"
+PIPELINE_VERSION = "2.13.0"
 PARIS_TZ = ZoneInfo("Europe/Paris") if ZoneInfo is not None else timezone.utc
+# La journée météo se termine à 6h du matin (pas minuit) : J+1 reprend à
+# 6h. Les heures 0h-6h restent donc rattachées à la journée précédente
+# plutôt que de faire basculer prématurément le badge/la frise sur la
+# suivante. Même décalage appliqué côté JS (cf. zonedDateKey) pour que la
+# frise et le résumé du jour restent cohérents entre les deux.
+DAY_BOUNDARY_HOUR = 6
+
+
+def _effective_date(moment: datetime) -> date:
+    return (moment.astimezone(PARIS_TZ) - timedelta(hours=DAY_BOUNDARY_HOUR)).date()
+
 
 DEFAULT_HARMONIE_BASE_URL = (
     "https://raw.githubusercontent.com/alertesmeteo-hub/harmonie/data"
@@ -287,6 +298,11 @@ def parse_args() -> argparse.Namespace:
         "--force",
         action="store_true",
         help="Retraite même si le run HARMONIE source n'a pas changé",
+    )
+    parser.add_argument(
+        "--geojson",
+        default=str(Path(__file__).resolve().parent.parent / "config" / "departements-france.geojson"),
+        help="Contours départementaux, pour repérer les voisins de chaque département",
     )
     return parser.parse_args()
 
@@ -688,9 +704,10 @@ def hourly_hazard_levels(
         "orages": orages_level,
         "grele": grele_level,
         # Cumul de pluie du jour (mm), pas un code instantané : le niveau à
-        # une heure donnée reflète le cumul depuis minuit jusqu'à cette
-        # heure-là (la frise progresse donc en escalier croissant sur la
-        # journée, comme un cumul réel).
+        # une heure donnée reflète le cumul depuis le début de la journée
+        # météo (6h, cf. _effective_date) jusqu'à cette heure-là (la frise
+        # progresse donc en escalier croissant sur la journée, comme un
+        # cumul réel).
         "pluie_inondation": _threshold_level(day_precip_mm, PLUIE_THRESHOLDS_MM),
         # Rafales (et non le vent moyen) : seuils fournis en km/h de rafale.
         "vent": _threshold_level(max_gust, VENT_THRESHOLDS_KMH),
@@ -724,16 +741,16 @@ def build_department_risk(
     # début de l'échéance disponible.
     running_precip = 0.0
     # Cumuls du jour courant (mm de pluie, cm de neige) pour Pluie-inondation
-    # et Neige : remis à zéro à chaque changement de journée calendaire
-    # Europe/Paris, contrairement à ``running_precip`` ci-dessus (qui ne se
-    # réinitialise jamais, propre au proxy de sécheresse de Feu).
+    # et Neige : remis à zéro à chaque changement de journée météo (6h,
+    # cf. _effective_date), contrairement à ``running_precip`` ci-dessus
+    # (qui ne se réinitialise jamais, propre au proxy de sécheresse de Feu).
     running_day_precip = 0.0
     running_day_snow = 0.0
     current_local_date: str | None = None
     hourly: list[dict[str, Any]] = []
     raw_by_date: dict[str, dict[str, float]] = {}
     for step_index, valid_time in enumerate(series.times):
-        local_date = valid_time.astimezone(PARIS_TZ).date().isoformat()
+        local_date = _effective_date(valid_time).isoformat()
         if local_date != current_local_date:
             running_day_precip = 0.0
             running_day_snow = 0.0
@@ -777,25 +794,22 @@ def build_department_risk(
         # le total du jour.
         day_raw["total_precip_mm"] = running_day_precip
 
-    # Regroupement par journée calendaire Europe/Paris.
+    # Regroupement par journée météo (6h → 6h, cf. _effective_date).
     days: dict[str, list[dict[str, Any]]] = {}
     for entry in hourly:
-        local_date = (
+        local_date = _effective_date(
             datetime.fromisoformat(entry["time"].replace("Z", "+00:00"))
-            .astimezone(PARIS_TZ)
-            .date()
-            .isoformat()
-        )
+        ).isoformat()
         days.setdefault(local_date, []).append(entry)
 
-    # J0 doit toujours être la date du jour (Europe/Paris), même si le run
-    # HARMONIE source est en retard et ne couvre pas encore (ou plus) la
-    # journée en cours : un département sans données pour une date cible
-    # reçoit simplement des niveaux à 0 plutôt que de décaler tout l'axe
-    # J/J+1/J+2. ``today`` est calculé une seule fois pour tout le run (et
-    # non par département) pour que les 96 départements du même run
-    # partagent exactement la même date J0, même si le traitement chevauche
-    # minuit.
+    # J0 doit toujours être la journée météo en cours (6h → 6h, Europe/
+    # Paris), même si le run HARMONIE source est en retard et ne couvre pas
+    # encore (ou plus) la journée en cours : un département sans données
+    # pour une date cible reçoit simplement des niveaux à 0 plutôt que de
+    # décaler tout l'axe J/J+1/J+2. ``today`` est calculé une seule fois
+    # pour tout le run (et non par département) pour que les 96
+    # départements du même run partagent exactement la même date J0, même
+    # si le traitement chevauche la limite des 6h.
     ordered_dates = [
         (today + timedelta(days=offset)).isoformat() for offset in range(day_count)
     ]
@@ -810,6 +824,111 @@ def build_department_risk(
         daily.append({"date": date_str, "hazards": day_levels})
 
     return {"daily": daily, "hourly": hourly}, raw_by_date
+
+
+def _department_centroids(geojson_path: Path) -> dict[str, tuple[float, float]]:
+    """Centroïde grossier (moyenne des sommets, pas un vrai centroïde
+    pondéré par aire) de chaque département, à partir du même GeoJSON que
+    la carte — suffisant pour classer les départements par proximité, pas
+    pour un calcul géométrique précis. Fichier absent ou illisible :
+    dict vide (aucun voisinage connu, la correction de cohérence
+    spatiale ci-dessous devient alors un no-op plutôt qu'une erreur)."""
+
+    try:
+        payload = json.loads(geojson_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as error:
+        LOGGER.warning("GeoJSON départements illisible (%s) : %s", geojson_path, error)
+        return {}
+
+    centroids: dict[str, tuple[float, float]] = {}
+    for feature in payload.get("features") or []:
+        code = str((feature.get("properties") or {}).get("code") or "").upper()
+        if not code:
+            continue
+        geometry = feature.get("geometry") or {}
+        rings: list[list[list[float]]] = []
+        if geometry.get("type") == "Polygon":
+            rings = geometry.get("coordinates") or []
+        elif geometry.get("type") == "MultiPolygon":
+            for polygon in geometry.get("coordinates") or []:
+                rings.extend(polygon)
+        points = [point for ring in rings for point in ring]
+        if not points:
+            continue
+        centroids[code] = (
+            sum(point[0] for point in points) / len(points),
+            sum(point[1] for point in points) / len(points),
+        )
+    return centroids
+
+
+def _nearest_neighbors(
+    centroids: dict[str, tuple[float, float]], count: int = 6
+) -> dict[str, list[str]]:
+    """Les ``count`` départements les plus proches (centroïde à centroïde)
+    de chaque département — un proxy de voisinage géographique qui évite
+    d'avoir à calculer une vraie adjacence de polygones (pas de dépendance
+    de géométrie supplémentaire dans ce pipeline volontairement léger)."""
+
+    codes = list(centroids.keys())
+    neighbors: dict[str, list[str]] = {}
+    for code in codes:
+        lon0, lat0 = centroids[code]
+        ranked = sorted(
+            (other for other in codes if other != code),
+            key=lambda other: (centroids[other][0] - lon0) ** 2
+            + (centroids[other][1] - lat0) ** 2,
+        )
+        neighbors[code] = ranked[:count]
+    return neighbors
+
+
+def _fill_isolated_green(
+    departments: dict[str, Any],
+    neighbors: dict[str, list[str]],
+    hazard: str = "orages",
+    min_neighbor_level: int = 2,
+    max_lenient_neighbors: int = 1,
+) -> None:
+    """Un département classé « Nul » alors que la quasi-totalité de ses
+    plus proches voisins sont classés « Marqué/Fort » ou pire reste
+    suspect plutôt qu'un vrai répit — bord de cellule mal capté par les
+    points de grille de CE département précisément, pas une preuve que le
+    danger s'arrête net à sa frontière (constaté en production : la
+    Seine-et-Marne et la Dordogne restaient « Nul », chacune entourée de
+    tous côtés par des départements classés). Relevé à « Faible/Modéré »
+    (1), pas au niveau des voisins : on sait seulement qu'un vrai répit
+    total y est peu probable, pas que ce département vit exactement la
+    même sévérité qu'eux."""
+
+    # Deux passes (lecture puis écriture) plutôt qu'une seule : muter
+    # ``departments`` pendant qu'on le parcourt ferait dépendre le résultat
+    # de l'ordre d'itération — un département tout juste relevé pourrait
+    # alors, dans la même passe, faire basculer un voisin qui ne l'aurait
+    # pas été sur la base des niveaux d'origine, en cascade.
+    corrections: list[tuple[str, int, int]] = []
+    for code, risk in departments.items():
+        own_neighbors = [n for n in neighbors.get(code, []) if n in departments]
+        if len(own_neighbors) < 3:
+            continue
+        for day_index, day_entry in enumerate(risk.get("daily") or []):
+            hazards = day_entry.get("hazards") or {}
+            if hazards.get(hazard, 0) != 0:
+                continue
+            neighbor_levels = []
+            for neighbor_code in own_neighbors:
+                neighbor_daily = departments[neighbor_code].get("daily") or []
+                if day_index < len(neighbor_daily):
+                    neighbor_hazards = neighbor_daily[day_index].get("hazards") or {}
+                    neighbor_levels.append(neighbor_hazards.get(hazard, 0))
+            if len(neighbor_levels) < 3:
+                continue
+            lenient = sum(1 for level in neighbor_levels if level < min_neighbor_level)
+            if lenient <= max_lenient_neighbors:
+                corrections.append((code, day_index, 1))
+
+    for code, day_index, new_level in corrections:
+        departments[code]["daily"][day_index]["hazards"][hazard] = new_level
 
 
 def department_display_name(series: DepartmentSeries) -> str | None:
@@ -840,12 +959,12 @@ def harmonie_run_time(session: requests.Session, base_url: str) -> datetime | No
 
 
 def build_risques(
-    base_url: str, day_count: int
+    base_url: str, day_count: int, geojson_path: Path | None = None
 ) -> tuple[dict[str, Any], datetime | None]:
     session = requests.Session()
     session.headers["User-Agent"] = "alertesmeteo-hub-risques/1.0"
 
-    today = datetime.now(PARIS_TZ).date()
+    today = _effective_date(datetime.now(timezone.utc))
     departments: dict[str, Any] = {}
     # {date: {field: (best_value, department_code)}} — alimenté au fil des
     # départements pour calculer le résumé national (records du jour, avec
@@ -894,6 +1013,16 @@ def build_risques(
             f"Trop de départements manquants ({len(departments)}/96) — "
             "le hub harmonie n'est probablement pas encore à jour."
         )
+
+    # Cohérence spatiale des orages : un département isolé à « Nul »
+    # entouré de départements marqués/forts est relevé au minimum observé
+    # chez ses voisins — cf. _fill_isolated_green. Sans GeoJSON exploitable,
+    # aucun voisinage n'est connu et cette étape ne change rien (no-op).
+    if geojson_path is not None:
+        centroids = _department_centroids(geojson_path)
+        if centroids:
+            neighbors = _nearest_neighbors(centroids)
+            _fill_isolated_green(departments, neighbors)
 
     # Résumé national par jour : maxi/mini de température, rafale maxi,
     # cumul de pluie maxi, chacun avec le département qui le détient — le
@@ -964,7 +1093,7 @@ def main() -> int:
             )
             return 0
 
-    manifest, run_time = build_risques(args.harmonie_base_url, args.days)
+    manifest, run_time = build_risques(args.harmonie_base_url, args.days, Path(args.geojson))
 
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
