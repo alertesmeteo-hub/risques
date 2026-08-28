@@ -43,7 +43,7 @@ except ImportError:  # pragma: no cover - Python < 3.9 non pris en charge ici
 
 
 LOGGER = logging.getLogger("risques")
-PIPELINE_VERSION = "2.13.0"
+PIPELINE_VERSION = "2.14.0"
 PARIS_TZ = ZoneInfo("Europe/Paris") if ZoneInfo is not None else timezone.utc
 # La journée météo se termine à 6h du matin (pas minuit) : J+1 reprend à
 # 6h. Les heures 0h-6h restent donc rattachées à la journée précédente
@@ -59,6 +59,9 @@ def _effective_date(moment: datetime) -> date:
 
 DEFAULT_HARMONIE_BASE_URL = (
     "https://raw.githubusercontent.com/alertesmeteo-hub/harmonie/data"
+)
+DEFAULT_AROME_BASE_URL = (
+    "https://raw.githubusercontent.com/alertesmeteo-hub/arome-meteofrance/data"
 )
 
 HAZARDS = (
@@ -274,6 +277,14 @@ def parse_args() -> argparse.Namespace:
         help="Racine des données HARMONIE déjà publiées (branche data)",
     )
     parser.add_argument(
+        "--arome-base-url",
+        default=DEFAULT_AROME_BASE_URL,
+        help=(
+            "Racine des données AROME déjà publiées (branche data) — second "
+            "avis moyenné avec HARMONIE pour orages/grêle, si disponible"
+        ),
+    )
+    parser.add_argument(
         "--output-dir",
         default="build/national",
         help="Dossier de publication à produire",
@@ -475,6 +486,79 @@ def _localized_risk_level(
         if int(np.sum(finite >= candidate)) >= threshold_count:
             return candidate
     return 0
+
+
+def load_arome_daily_levels(
+    session: requests.Session, base_url: str, code: str, day_count: int, today: date
+) -> dict[str, dict[str, int]] | None:
+    """Second avis pour orages/grêle : le module AROME (dépôt et pipeline
+    indépendants, résolution ~1,3 km contre 5,5 km pour HARMONIE) publie
+    déjà ses propres ``thunder_risk_code``/``hail_risk_code`` sur la même
+    échelle 0-4, mais à partir de critères différents — une CAPE directe
+    (pas approximée comme côté HARMONIE) et une réflectivité radar
+    modélisée (que HARMONIE ne fournit pas du tout). Les deux modèles se
+    corrigent mutuellement plutôt que de dépendre d'un seul.
+
+    Même agrégation que côté HARMONIE (_localized_risk_level par heure,
+    max sur la journée météo 6h-6h) pour rester comparable. None si AROME
+    est indisponible pour ce département ou n'a pas ces colonnes — le
+    pipeline continue alors avec HARMONIE seul, sans faire échouer le run."""
+
+    try:
+        payload = fetch_json(session, f"{base_url}/departements/{code}.json")
+    except (requests.RequestException, ValueError):
+        return None
+    if payload.get("status") != "ok":
+        return None
+    value_names: list[str] = ((payload.get("columns") or {}).get("values")) or []
+    if "thunder_risk_code" not in value_names or "hail_risk_code" not in value_names:
+        return None
+    thunder_index = value_names.index("thunder_risk_code")
+    hail_index = value_names.index("hail_risk_code")
+
+    by_day: dict[str, dict[str, int]] = {}
+    for entry in payload.get("forecast") or []:
+        try:
+            iso_time, rows = entry
+            valid_time = datetime.fromisoformat(iso_time.replace("Z", "+00:00"))
+        except (ValueError, TypeError):
+            continue
+        date_str = _effective_date(valid_time).isoformat()
+        thunder_values = np.asarray(
+            [row[thunder_index] for row in rows if row[thunder_index] is not None],
+            dtype=np.float64,
+        )
+        hail_values = np.asarray(
+            [row[hail_index] for row in rows if row[hail_index] is not None],
+            dtype=np.float64,
+        )
+        slot = by_day.setdefault(date_str, {"orages": 0, "grele": 0})
+        slot["orages"] = max(slot["orages"], _localized_risk_level(thunder_values))
+        slot["grele"] = max(slot["grele"], _localized_risk_level(hail_values))
+
+    ordered_dates = [
+        (today + timedelta(days=offset)).isoformat() for offset in range(day_count)
+    ]
+    return {date_str: by_day[date_str] for date_str in ordered_dates if date_str in by_day}
+
+
+def _blend_with_arome(daily: list[dict[str, Any]], arome_levels: dict[str, dict[str, int]]) -> None:
+    """Moyenne arrondie entre le niveau HARMONIE déjà calculé et le niveau
+    AROME du même jour, pour orages et grêle uniquement — les autres aléas
+    n'ont pas de second avis indépendant disponible. Un jour sans donnée
+    AROME correspondante garde simplement le niveau HARMONIE seul."""
+
+    for day_entry in daily:
+        arome_day = arome_levels.get(day_entry.get("date"))
+        if not arome_day:
+            continue
+        hazards = day_entry.get("hazards") or {}
+        for hazard in ("orages", "grele"):
+            arome_level = arome_day.get(hazard)
+            if arome_level is None:
+                continue
+            harmonie_level = hazards.get(hazard, 0)
+            hazards[hazard] = round((harmonie_level + arome_level) / 2)
 
 
 def _threshold_level(value: float, thresholds: tuple[float, ...]) -> int:
@@ -959,7 +1043,10 @@ def harmonie_run_time(session: requests.Session, base_url: str) -> datetime | No
 
 
 def build_risques(
-    base_url: str, day_count: int, geojson_path: Path | None = None
+    base_url: str,
+    day_count: int,
+    geojson_path: Path | None = None,
+    arome_base_url: str | None = None,
 ) -> tuple[dict[str, Any], datetime | None]:
     session = requests.Session()
     session.headers["User-Agent"] = "alertesmeteo-hub-risques/1.0"
@@ -982,6 +1069,12 @@ def build_risques(
             missing += 1
             continue
         risk, raw_by_date = result
+        if arome_base_url:
+            arome_levels = load_arome_daily_levels(
+                session, arome_base_url, code, day_count, today
+            )
+            if arome_levels:
+                _blend_with_arome(risk["daily"], arome_levels)
         departments[code] = risk
         for date_str, raw in raw_by_date.items():
             slot = national_by_date.setdefault(date_str, {})
@@ -1093,7 +1186,9 @@ def main() -> int:
             )
             return 0
 
-    manifest, run_time = build_risques(args.harmonie_base_url, args.days, Path(args.geojson))
+    manifest, run_time = build_risques(
+        args.harmonie_base_url, args.days, Path(args.geojson), args.arome_base_url
+    )
 
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
