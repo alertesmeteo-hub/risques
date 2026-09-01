@@ -43,13 +43,10 @@ except ImportError:  # pragma: no cover - Python < 3.9 non pris en charge ici
 
 
 LOGGER = logging.getLogger("risques")
-PIPELINE_VERSION = "2.14.0"
+PIPELINE_VERSION = "2.15.0"
 PARIS_TZ = ZoneInfo("Europe/Paris") if ZoneInfo is not None else timezone.utc
-# La journée météo se termine à 6h du matin (pas minuit) : J+1 reprend à
-# 6h. Les heures 0h-6h restent donc rattachées à la journée précédente
-# plutôt que de faire basculer prématurément le badge/la frise sur la
-# suivante. Même décalage appliqué côté JS (cf. zonedDateKey) pour que la
-# frise et le résumé du jour restent cohérents entre les deux.
+# La journée météo va de 6 h à 6 h en Europe/Paris. Les heures comprises
+# entre minuit et 6 h restent donc rattachées à la journée précédente.
 DAY_BOUNDARY_HOUR = 6
 
 
@@ -789,7 +786,7 @@ def hourly_hazard_levels(
         "grele": grele_level,
         # Cumul de pluie du jour (mm), pas un code instantané : le niveau à
         # une heure donnée reflète le cumul depuis le début de la journée
-        # météo (6h, cf. _effective_date) jusqu'à cette heure-là (la frise
+        # météo (6 h, cf. _effective_date) jusqu'à cette heure-là (la frise
         # progresse donc en escalier croissant sur la journée, comme un
         # cumul réel).
         "pluie_inondation": _threshold_level(day_precip_mm, PLUIE_THRESHOLDS_MM),
@@ -878,7 +875,7 @@ def build_department_risk(
         # le total du jour.
         day_raw["total_precip_mm"] = running_day_precip
 
-    # Regroupement par journée météo (6h → 6h, cf. _effective_date).
+    # Regroupement par journée météo locale (6 h → 6 h).
     days: dict[str, list[dict[str, Any]]] = {}
     for entry in hourly:
         local_date = _effective_date(
@@ -886,7 +883,7 @@ def build_department_risk(
         ).isoformat()
         days.setdefault(local_date, []).append(entry)
 
-    # J0 doit toujours être la journée météo en cours (6h → 6h, Europe/
+    # J0 doit toujours être la journée météo en cours (6 h → 6 h, Europe/
     # Paris), même si le run HARMONIE source est en retard et ne couvre pas
     # encore (ou plus) la journée en cours : un département sans données
     # pour une date cible reçoit simplement des niveaux à 0 plutôt que de

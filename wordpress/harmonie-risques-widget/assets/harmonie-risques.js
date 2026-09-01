@@ -339,9 +339,10 @@
     }
 
     function zonedDateKey(iso, tz) {
+        var meteorologicalDate = new Date(new Date(iso).getTime() - 6 * 60 * 60 * 1000);
         return new Intl.DateTimeFormat('en-CA', {
             timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit'
-        }).format(new Date(iso));
+        }).format(meteorologicalDate);
     }
 
     function initApp(app) {
@@ -530,6 +531,18 @@
                 });
                 dayTabs.appendChild(button);
             });
+        }
+
+        function selectCurrentMeteorologicalDay() {
+            var department = manifest && manifest.departments
+                ? manifest.departments[selectedDepartment || Object.keys(manifest.departments)[0]]
+                : null;
+            var daily = department ? department.daily : [];
+            var today = zonedDateKey(new Date().toISOString(), timezone);
+            var todayIndex = daily.findIndex(function (entry) {
+                return entry && entry.date === today;
+            });
+            currentDayIndex = todayIndex >= 0 ? todayIndex : 0;
         }
 
         function setHazard(hazard) {
@@ -1134,6 +1147,7 @@
             if (!manifest || manifest.status !== 'ok') {
                 throw new Error('Manifeste de risques invalide');
             }
+            selectCurrentMeteorologicalDay();
             buildMap(geojson);
             buildLegend();
             buildHazardTabs();
