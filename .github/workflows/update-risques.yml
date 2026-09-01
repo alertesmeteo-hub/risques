@@ -8,12 +8,10 @@ on:
         type: boolean
         default: false
   schedule:
-    # Calé à :50, après le passage HARMONIE à :10 (lui aussi horaire depuis
-    # peu, contre toutes les 6h avant), pour lui laisser le temps de
-    # publier — mais un run vérifie d'abord si le run source a déjà été
-    # traité (via --current-metadata-url) avant de faire le travail, donc
-    # une fréquence horaire ne coûte quasi rien la plupart du temps.
-    - cron: "50 * * * *"
+    # 04:50 et 05:50 UTC, soit 06:50 et 07:50 à Paris pendant l'heure d'été.
+    # Le délai de 40 min après la publication HARMONIE à :10 laisse les
+    # données source arriver avant le calcul des risques.
+    - cron: "50 4,5 * * *"
 
 permissions:
   contents: write
