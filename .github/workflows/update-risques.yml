@@ -8,10 +8,11 @@ on:
         type: boolean
         default: false
   schedule:
-    # 04:50 et 05:50 UTC, soit 06:50 et 07:50 à Paris pendant l'heure d'été.
+    # 04:50, 05:50, 08:50, 11:50, 14:50 et 17:50 UTC, soit 06:50, 07:50,
+    # 10:50, 13:50, 16:50 et 19:50 à Paris pendant l'heure d'été.
     # Le délai de 40 min après la publication HARMONIE à :10 laisse les
     # données source arriver avant le calcul des risques.
-    - cron: "50 4,5 * * *"
+    - cron: "50 4,5,8,11,14,17 * * *"
 
 permissions:
   contents: write
