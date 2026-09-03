@@ -614,11 +614,20 @@
             return hazards[hazard] || 0;
         }
 
+        // Aplat neutre des départements sur l'onglet Littoral : l'alerte s'y
+        // lit uniquement sur le trait de côte (cf. paintLittoralOverlay), pas
+        // sur un remplissage département par département comme les autres
+        // aléas — un aplat coloré partout (y compris les départements non
+        // côtiers, toujours à « Nul ») donnait l'impression trompeuse que
+        // l'aléa concernait la France entière plutôt que le seul littoral.
+        var LITTORAL_NEUTRAL_FILL = '#dfe6ea';
+
         function paintMap() {
+            var isLittoral = currentHazard === 'littoral';
             Object.keys(mapEntries).forEach(function (code) {
                 var level = departmentLevel(code, currentHazard, currentDayIndex);
-                var color = levelInfo(currentHazard, level).color;
-                var showIconForLevel = level >= ICON_MIN_LEVEL;
+                var color = isLittoral ? LITTORAL_NEUTRAL_FILL : levelInfo(currentHazard, level).color;
+                var showIconForLevel = !isLittoral && level >= ICON_MIN_LEVEL;
                 mapEntries[code].forEach(function (entry) {
                     entry.path.setAttribute('fill', color);
                     entry.path.classList.toggle('is-selected', code === selectedDepartment);
