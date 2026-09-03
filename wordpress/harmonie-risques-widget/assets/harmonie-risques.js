@@ -377,6 +377,19 @@
         return points;
     }
 
+    function pointToSegmentDistanceSquared(px, py, ax, ay, bx, by) {
+        var dx = bx - ax;
+        var dy = by - ay;
+        var lengthSquared = dx * dx + dy * dy;
+        var t = lengthSquared > 0 ? ((px - ax) * dx + (py - ay) * dy) / lengthSquared : 0;
+        t = Math.max(0, Math.min(1, t));
+        var cx = ax + t * dx;
+        var cy = ay + t * dy;
+        var ex = px - cx;
+        var ey = py - cy;
+        return ex * ex + ey * ey;
+    }
+
     function buildLittoralRuns(deptFeatures, coastGeojson, project) {
         var deptPoints = {};
         deptFeatures.forEach(function (feature) {
@@ -387,49 +400,70 @@
         var codes = Object.keys(deptPoints);
         if (!codes.length) { return []; }
 
+        // Distance au contour (segment par segment), pas au sommet le plus
+        // proche : un contour départemental n'a que quelques sommets le
+        // long d'un tronçon de côte à peu près droit, donc la distance au
+        // sommet le plus proche pouvait rester grande même pour un point du
+        // trait de côte réellement à l'intérieur de ce département.
+        //
+        // Toujours renvoyer le département le plus proche, sans seuil de
+        // rejet : un seuil laissait des trous visibles dans le trait à
+        // chaque endroit où le tracé Natural Earth s'écarte un peu plus du
+        // contour IGN (estuaires, caps), y compris entre deux départements
+        // pourtant tous deux en alerte — exactement le défaut signalé
+        // (couleurs qui ne se rejoignent pas). Le seul cas où ce choix
+        // « au plus proche, toujours » déborde un peu est la portion de
+        // côte belge/espagnole/italienne dans la marge de la zone
+        // d'extraction, rattachée par défaut au département français
+        // voisin le plus proche (Nord/Pyrénées-Orientales/Alpes-Maritimes)
+        // — un léger débordement plutôt qu'un vide, plus proche de ce qui
+        // était demandé.
         function nearestDepartment(lon, lat) {
             var bestCode = null;
             var bestDist = Infinity;
             codes.forEach(function (code) {
                 var points = deptPoints[code];
-                for (var i = 0; i < points.length; i++) {
-                    var dx = points[i][0] - lon;
-                    var dy = points[i][1] - lat;
-                    var dist = dx * dx + dy * dy;
+                for (var i = 0; i < points.length - 1; i++) {
+                    var dist = pointToSegmentDistanceSquared(
+                        lon, lat,
+                        points[i][0], points[i][1],
+                        points[i + 1][0], points[i + 1][1]
+                    );
                     if (dist < bestDist) {
                         bestDist = dist;
                         bestCode = code;
                     }
                 }
             });
-            // Au-delà d'environ 0,3° (~30 km) du sommet départemental le
-            // plus proche, le point du trait de côte est trop loin d'un
-            // département couvert (îles isolées, artefact d'extraction) :
-            // mieux vaut l'ignorer que de le rattacher à un département
-            // au hasard.
-            return bestDist <= 0.09 ? bestCode : null;
+            return bestCode;
         }
 
         var runs = [];
         (coastGeojson.features || []).forEach(function (feature) {
             var geometry = feature.geometry;
             if (!geometry || geometry.type !== 'LineString') { return; }
-            var currentCode = null;
-            var currentPoints = [];
-            geometry.coordinates.forEach(function (coord) {
-                var code = nearestDepartment(coord[0], coord[1]);
-                if (code !== currentCode) {
-                    if (currentCode && currentPoints.length >= 2) {
-                        runs.push({ code: currentCode, points: currentPoints });
-                    }
-                    currentCode = code;
-                    currentPoints = code ? [coord] : [];
-                } else if (code) {
-                    currentPoints.push(coord);
+            var coords = geometry.coordinates;
+            var pointCodes = coords.map(function (coord) { return nearestDepartment(coord[0], coord[1]); });
+            var index = 0;
+            while (index < coords.length) {
+                var code = pointCodes[index];
+                var segment = [coords[index]];
+                var next = index + 1;
+                while (next < coords.length && pointCodes[next] === code) {
+                    segment.push(coords[next]);
+                    next += 1;
                 }
-            });
-            if (currentCode && currentPoints.length >= 2) {
-                runs.push({ code: currentCode, points: currentPoints });
+                // Le point de transition (département suivant) est répété
+                // en fin de tronçon pour que les deux traits se rejoignent
+                // exactement au même pixel plutôt que de laisser un blanc à
+                // la jointure entre deux départements côtiers.
+                if (next < coords.length) {
+                    segment.push(coords[next]);
+                }
+                if (segment.length >= 2) {
+                    runs.push({ code: code, points: segment });
+                }
+                index = next;
             }
         });
 
