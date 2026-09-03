@@ -418,6 +418,20 @@
         // voisin le plus proche (Nord/Pyrénées-Orientales/Alpes-Maritimes)
         // — un léger débordement plutôt qu'un vide, plus proche de ce qui
         // était demandé.
+        // Le trait Natural Earth suit la côte physique, pas les frontières
+        // politiques : sans coupure, la côte belge (au nord du Nord),
+        // espagnole (au sud des Pyrénées-Orientales) et italienne (à l'est
+        // des Alpes-Maritimes) se rattachaient au département français le
+        // plus proche et débordaient hors de France. Coordonnées
+        // approximatives des points frontière réels sur la côte (De Panne,
+        // Cerbère, Menton) — au-delà, on ignore le point plutôt que de
+        // prolonger le trait sur un pays voisin.
+        var BORDER_CUTOFFS = {
+            '59': function (lon, lat) { return lat > 51.10; },
+            '66': function (lon, lat) { return lat < 42.40; },
+            '06': function (lon, lat) { return lon > 7.56; }
+        };
+
         function nearestDepartment(lon, lat) {
             var bestCode = null;
             var bestDist = Infinity;
@@ -435,6 +449,8 @@
                     }
                 }
             });
+            var cutoff = BORDER_CUTOFFS[bestCode];
+            if (cutoff && cutoff(lon, lat)) { return null; }
             return bestCode;
         }
 
@@ -447,17 +463,20 @@
             var index = 0;
             while (index < coords.length) {
                 var code = pointCodes[index];
+                if (!code) { index += 1; continue; }
                 var segment = [coords[index]];
                 var next = index + 1;
                 while (next < coords.length && pointCodes[next] === code) {
                     segment.push(coords[next]);
                     next += 1;
                 }
-                // Le point de transition (département suivant) est répété
-                // en fin de tronçon pour que les deux traits se rejoignent
-                // exactement au même pixel plutôt que de laisser un blanc à
-                // la jointure entre deux départements côtiers.
-                if (next < coords.length) {
+                // Le point de transition est répété en fin de tronçon pour
+                // que deux départements français voisins se rejoignent au
+                // même pixel plutôt que de laisser un blanc à leur jointure
+                // — sauf si ce point suivant est au-delà d'une frontière
+                // internationale (code null), où le trait doit justement
+                // s'arrêter net.
+                if (next < coords.length && pointCodes[next]) {
                     segment.push(coords[next]);
                 }
                 if (segment.length >= 2) {
