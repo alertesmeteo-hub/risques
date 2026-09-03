@@ -43,7 +43,7 @@ except ImportError:  # pragma: no cover - Python < 3.9 non pris en charge ici
 
 
 LOGGER = logging.getLogger("risques")
-PIPELINE_VERSION = "2.17.0"
+PIPELINE_VERSION = "2.17.1"
 PARIS_TZ = ZoneInfo("Europe/Paris") if ZoneInfo is not None else timezone.utc
 # La journée météo va de 6 h à 6 h en Europe/Paris. Les heures comprises
 # entre minuit et 6 h restent donc rattachées à la journée précédente.
@@ -618,7 +618,7 @@ CHALEUR_THRESHOLDS = (25.0, 28.0, 31.0, 34.0, 37.0, 40.0, 45.0)
 # avait été supprimé par erreur lors de l'ajout du 5mm, alors qu'il devait
 # rester comme palier « Extrême » le plus haut.
 PLUIE_THRESHOLDS_MM = (5.0, 15.0, 30.0, 50.0, 80.0, 150.0, 300.0, 500.0)
-VENT_THRESHOLDS_KMH = (70.0, 80.0, 90.0, 100.0, 110.0, 130.0, 150.0, 180.0)
+VENT_THRESHOLDS_KMH = (60.0, 80.0, 90.0, 100.0, 110.0, 130.0, 150.0, 180.0)
 # Littoral : indice non officiel (pas de vagues/marée/surcote dans HARMONIE),
 # cocktail rafale + pression basse sur les départements côtiers uniquement
 # (cf. LITTORAL_DEPARTMENTS) — mêmes seuils de rafale que Vent, avec un cran
