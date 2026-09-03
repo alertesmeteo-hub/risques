@@ -4,6 +4,16 @@
     var COMMUNES_API = 'https://geo.api.gouv.fr/communes';
     var SVG_NS = 'http://www.w3.org/2000/svg';
     var IDF_CODES = ['75', '77', '78', '91', '92', '93', '94', '95'];
+    // Départements côtiers — même liste que LITTORAL_DEPARTMENTS côté
+    // pipeline Python (update_risques.py) : seuls ces départements peuvent
+    // avoir un niveau Littoral non nul, donc seuls ceux-là reçoivent un
+    // tracé sur le trait de côte.
+    var LITTORAL_DEPARTMENT_CODES = [
+        '59', '62', '80', '76', '14', '50', '35', '22', '29', '56',
+        '44', '85', '17', '33', '40', '64',
+        '66', '11', '34', '30', '13', '83', '06',
+        '2A', '2B'
+    ];
     var ICON_MIN_LEVEL = 2;
 
     // Icônes vectorielles épurées (monochromes, viewBox 24x24, dessinées à
@@ -349,6 +359,85 @@
         return best || [];
     }
 
+    // --- Trait littoral : le tracé Natural Earth (littoral-coastline.geojson,
+    // même source que les cartes raster HARMONIE/AROME) est indépendant du
+    // GeoJSON départemental — pas de correspondance directe entre ses points
+    // et un département. On rattache chaque point du trait de côte au
+    // département dont un sommet du contour est le plus proche (les deux
+    // tracés suivent la même côte réelle, donc restent proches l'un de
+    // l'autre), puis on découpe le trait en tronçons consécutifs de même
+    // département pour pouvoir colorer chaque tronçon selon son niveau
+    // d'alerte Littoral.
+    function departmentExteriorLonLat(geometry) {
+        var polygons = geometry.type === 'Polygon' ? [geometry.coordinates] : geometry.coordinates;
+        var points = [];
+        polygons.forEach(function (polygon) {
+            if (polygon.length) { points = points.concat(polygon[0]); }
+        });
+        return points;
+    }
+
+    function buildLittoralRuns(deptFeatures, coastGeojson, project) {
+        var deptPoints = {};
+        deptFeatures.forEach(function (feature) {
+            var code = String((feature.properties || {}).code || '').toUpperCase();
+            if (LITTORAL_DEPARTMENT_CODES.indexOf(code) === -1 || !feature.geometry) { return; }
+            deptPoints[code] = departmentExteriorLonLat(feature.geometry);
+        });
+        var codes = Object.keys(deptPoints);
+        if (!codes.length) { return []; }
+
+        function nearestDepartment(lon, lat) {
+            var bestCode = null;
+            var bestDist = Infinity;
+            codes.forEach(function (code) {
+                var points = deptPoints[code];
+                for (var i = 0; i < points.length; i++) {
+                    var dx = points[i][0] - lon;
+                    var dy = points[i][1] - lat;
+                    var dist = dx * dx + dy * dy;
+                    if (dist < bestDist) {
+                        bestDist = dist;
+                        bestCode = code;
+                    }
+                }
+            });
+            // Au-delà d'environ 0,3° (~30 km) du sommet départemental le
+            // plus proche, le point du trait de côte est trop loin d'un
+            // département couvert (îles isolées, artefact d'extraction) :
+            // mieux vaut l'ignorer que de le rattacher à un département
+            // au hasard.
+            return bestDist <= 0.09 ? bestCode : null;
+        }
+
+        var runs = [];
+        (coastGeojson.features || []).forEach(function (feature) {
+            var geometry = feature.geometry;
+            if (!geometry || geometry.type !== 'LineString') { return; }
+            var currentCode = null;
+            var currentPoints = [];
+            geometry.coordinates.forEach(function (coord) {
+                var code = nearestDepartment(coord[0], coord[1]);
+                if (code !== currentCode) {
+                    if (currentCode && currentPoints.length >= 2) {
+                        runs.push({ code: currentCode, points: currentPoints });
+                    }
+                    currentCode = code;
+                    currentPoints = code ? [coord] : [];
+                } else if (code) {
+                    currentPoints.push(coord);
+                }
+            });
+            if (currentCode && currentPoints.length >= 2) {
+                runs.push({ code: currentCode, points: currentPoints });
+            }
+        });
+
+        return runs.map(function (run) {
+            return { code: run.code, points: run.points.map(function (c) { return project(c[0], c[1]); }) };
+        });
+    }
+
     function zonedDateKey(iso, tz) {
         // Journée « météo » : se termine à 6h du matin plutôt qu'à minuit,
         // J+1 reprend à 6h — les heures 0h-6h restent rattachées à la
@@ -379,6 +468,7 @@
     function initApp(app) {
         var baseUrl = (app.dataset.baseUrl || '').replace(/\/+$/, '');
         var geojsonUrl = app.dataset.geojsonUrl || '';
+        var littoralUrl = app.dataset.littoralUrl || '';
         var defaultDepartment = (app.dataset.defaultDepartment || '').toUpperCase();
         var defaultHazard = app.dataset.defaultHazard || 'orages';
         var timezone = app.dataset.timezone || 'Europe/Paris';
@@ -417,6 +507,8 @@
         var manifest = null;
         var mapEntries = {};
         var namesByCode = {};
+        var littoralRuns = [];
+        var littoralOverlayGroup = null;
         var currentHazard = defaultHazard;
         var currentDayIndex = 0;
         var selectedDepartment = defaultDepartment || null;
@@ -538,6 +630,39 @@
                         entry.iconGroup.style.display = 'none';
                     }
                 });
+            });
+            paintLittoralOverlay();
+        }
+
+        // Trait de côte coloré par le niveau d'alerte Littoral de chaque
+        // département côtier — visible uniquement sur l'onglet Littoral (les
+        // autres aléas gardent le seul remplissage à plat des départements),
+        // demandé explicitement pour repérer l'alerte d'un coup d'œil sur la
+        // ligne de côte plutôt que sur l'aplat du département entier.
+        function paintLittoralOverlay() {
+            if (!littoralOverlayGroup) { return; }
+            littoralOverlayGroup.replaceChildren();
+            if (currentHazard !== 'littoral' || !littoralRuns.length) {
+                littoralOverlayGroup.style.display = 'none';
+                return;
+            }
+            littoralOverlayGroup.style.display = '';
+            littoralRuns.forEach(function (run) {
+                var level = departmentLevel(run.code, 'littoral', currentDayIndex);
+                var color = levelInfo('littoral', level).color;
+                var d = run.points.map(function (xy, index) {
+                    return (index === 0 ? 'M' : 'L') + xy[0].toFixed(2) + ',' + xy[1].toFixed(2);
+                }).join(' ');
+                var path = createSvgElement('path', {
+                    d: d,
+                    fill: 'none',
+                    stroke: level > 0 ? color : '#5b6b7a',
+                    'stroke-width': level > 0 ? (3 + level) : 1.5,
+                    'stroke-linecap': 'round',
+                    'stroke-linejoin': 'round',
+                    opacity: level > 0 ? 1 : 0.55
+                });
+                littoralOverlayGroup.appendChild(path);
             });
         }
 
@@ -1074,7 +1199,7 @@
             });
         }
 
-        function buildMap(geojson) {
+        function buildMap(geojson, coastGeojson) {
             var features = geojson.features || [];
             buildMapInto(mapSvg, features, 1000, 12, IDF_CODES, 13);
 
@@ -1083,6 +1208,14 @@
                 return IDF_CODES.indexOf(code) !== -1;
             });
             buildMapInto(insetSvg, idfFeatures, 300, 14, [], 17);
+
+            littoralOverlayGroup = createSvgElement('g', { 'pointer-events': 'none' });
+            mapSvg.appendChild(littoralOverlayGroup);
+            if (coastGeojson) {
+                var bounds = computeBoundsFromFeatures(features);
+                var project = buildProjector(bounds, 1000, 12);
+                littoralRuns = buildLittoralRuns(features, coastGeojson, project);
+            }
 
             mapLoading.hidden = true;
         }
@@ -1309,14 +1442,18 @@
 
         Promise.all([
             fetchJson(baseUrl + '/risques.json'),
-            fetchText(geojsonUrl).then(function (text) { return JSON.parse(text); })
+            fetchText(geojsonUrl).then(function (text) { return JSON.parse(text); }),
+            littoralUrl
+                ? fetchText(littoralUrl).then(function (text) { return JSON.parse(text); }).catch(function () { return null; })
+                : Promise.resolve(null)
         ]).then(function (results) {
             manifest = results[0];
             var geojson = results[1];
+            var coastGeojson = results[2];
             if (!manifest || manifest.status !== 'ok') {
                 throw new Error('Manifeste de risques invalide');
             }
-            buildMap(geojson);
+            buildMap(geojson, coastGeojson);
             buildLegend();
             buildHazardTabs();
             buildDayTabs();

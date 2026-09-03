@@ -3,7 +3,7 @@
  * Plugin Name: Carte de Vigilance HARMONIE (risques)
  * Plugin URI: https://github.com/alertesmeteo-hub/risques
  * Description: Carte de risques météo non officielle (11 aléas, échelle propre à chaque aléa, J/J+1) dérivée du modèle HARMONIE, avec frises horaires.
- * Version: 2.10.0
+ * Version: 2.11.0
  * Author: Alertes Météo Hub
  * Requires at least: 5.8
  * Requires PHP: 7.4
@@ -14,7 +14,7 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-define('HRW_VERSION', '2.10.0');
+define('HRW_VERSION', '2.11.0');
 define('HRW_RELEASE_DATE', '2026-09-03');
 define('HRW_OPTION_BASE_URL', 'hrw_risques_data_base_url');
 define(
@@ -212,7 +212,7 @@ function hrw_render_admin_help_page() {
         <p><code>[harmonie_risques]</code> : carte de vigilance complète (11 aléas, J/J+1, recherche, frises).</p>
         <p><code>[harmonie_risques departement="75" alea="orages"]</code> : ouvre directement sur un département et un aléa donnés.</p>
         <p>L’aléa <strong>Feu</strong> est un indice non officiel (cocktail météo), affiché avec un avertissement systématique — il ne remplace pas Météo des forêts.</p>
-        <p>L’aléa <strong>Littoral</strong> est également un indice non officiel (rafales et pression, sans donnée de vagues, marée ni surcote) — il ne remplace pas la Vigilance vagues-submersion de Météo-France. Il n’est calculé que pour les départements côtiers.</p>
+        <p>L’aléa <strong>Littoral</strong> est également un indice non officiel (rafales et pression, sans donnée de vagues, marée ni surcote) — il ne remplace pas la Vigilance vagues-submersion de Météo-France. Il n’est calculé que pour les départements côtiers, et se signale par un trait coloré le long de la côte plutôt qu’un aplat du département entier.</p>
         <p>Voir <a href="<?php echo esc_url(admin_url('options-general.php?page=harmonie-risques')); ?>">Réglages</a> pour l’adresse du dossier de données.</p>
     </div>
     <?php
@@ -307,6 +307,7 @@ function hrw_render_shortcode($atts) {
         data-hrw-app
         data-base-url="<?php echo esc_url(hrw_base_url()); ?>"
         data-geojson-url="<?php echo esc_url(plugin_dir_url(__FILE__) . 'assets/departements-france.geojson'); ?>"
+        data-littoral-url="<?php echo esc_url(plugin_dir_url(__FILE__) . 'assets/littoral-coastline.geojson'); ?>"
         data-default-department="<?php echo esc_attr($department); ?>"
         data-default-hazard="<?php echo esc_attr($hazard); ?>"
         data-timezone="<?php echo esc_attr(wp_timezone_string()); ?>"
