@@ -682,11 +682,28 @@
                 var d = run.points.map(function (xy, index) {
                     return (index === 0 ? 'M' : 'L') + xy[0].toFixed(2) + ',' + xy[1].toFixed(2);
                 }).join(' ');
+                var width = level > 0 ? (10 + level * 2) : 3;
+                if (level > 0) {
+                    // Liseré sombre sous le trait coloré : sur une carte de
+                    // la France entière (viewBox 1000, rendue sur quelques
+                    // centaines de pixels), un trait fin de la couleur du
+                    // palier se fondait dans le fond clair et la frontière
+                    // départementale déjà présente au même endroit — trop
+                    // discret pour être vu sans zoomer fortement.
+                    littoralOverlayGroup.appendChild(createSvgElement('path', {
+                        d: d,
+                        fill: 'none',
+                        stroke: '#1c1f26',
+                        'stroke-width': width + 4,
+                        'stroke-linecap': 'round',
+                        'stroke-linejoin': 'round'
+                    }));
+                }
                 var path = createSvgElement('path', {
                     d: d,
                     fill: 'none',
                     stroke: level > 0 ? color : '#5b6b7a',
-                    'stroke-width': level > 0 ? (3 + level) : 1.5,
+                    'stroke-width': width,
                     'stroke-linecap': 'round',
                     'stroke-linejoin': 'round',
                     opacity: level > 0 ? 1 : 0.55
