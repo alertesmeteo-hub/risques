@@ -432,7 +432,7 @@
             '06': function (lon, lat) { return lon > 7.56; }
         };
 
-        function nearestDepartment(lon, lat) {
+        function nearestDepartmentInfo(lon, lat) {
             var bestCode = null;
             var bestDist = Infinity;
             codes.forEach(function (code) {
@@ -449,9 +449,36 @@
                     }
                 }
             });
-            var cutoff = BORDER_CUTOFFS[bestCode];
+            return { code: bestCode, dist: bestDist };
+        }
+
+        function nearestDepartment(lon, lat) {
+            var code = nearestDepartmentInfo(lon, lat).code;
+            var cutoff = BORDER_CUTOFFS[code];
             if (cutoff && cutoff(lon, lat)) { return null; }
-            return bestCode;
+            return code;
+        }
+
+        // Le tracé Natural Earth couvre aussi les côtes britanniques et
+        // anglo-normandes (Kent, Cornouailles, Jersey, Guernesey...) comme
+        // tronçons séparés du même fichier — sans filtre, un tronçon
+        // entièrement étranger peut quand même se voir rattaché au
+        // département français le plus proche point par point (la Manche
+        // est étroite : Douvres n'est qu'à ~34 km de Calais), ce qui
+        // prolongeait le trait jusqu'en Angleterre. On ne garde donc un
+        // tronçon entier que si une bonne part de ses points colle
+        // réellement à un contour départemental français (0,4 mesuré
+        // empiriquement : sépare nettement les tronçons français, à ≥ 0,74,
+        // des tronçons anglo-normands, à ≤ 0,33).
+        var FEATURE_KEEP_FRACTION = 0.4;
+
+        function isFrenchFeature(coords) {
+            if (!coords.length) { return false; }
+            var within = 0;
+            coords.forEach(function (coord) {
+                if (nearestDepartmentInfo(coord[0], coord[1]).dist <= 0.09) { within += 1; }
+            });
+            return within / coords.length >= FEATURE_KEEP_FRACTION;
         }
 
         var runs = [];
@@ -459,6 +486,7 @@
             var geometry = feature.geometry;
             if (!geometry || geometry.type !== 'LineString') { return; }
             var coords = geometry.coordinates;
+            if (!isFrenchFeature(coords)) { return; }
             var pointCodes = coords.map(function (coord) { return nearestDepartment(coord[0], coord[1]); });
             var index = 0;
             while (index < coords.length) {
