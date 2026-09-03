@@ -683,6 +683,16 @@
                     return (index === 0 ? 'M' : 'L') + xy[0].toFixed(2) + ',' + xy[1].toFixed(2);
                 }).join(' ');
                 var width = level > 0 ? (10 + level * 2) : 3;
+                // Le style est posé via l'attribut `style` (pas `stroke`/
+                // `stroke-width` en attributs de présentation) : la feuille
+                // de styles a une règle générale `.hrw-map path { stroke:
+                // ...; stroke-width: 1; }` qui s'applique à TOUS les <path>
+                // de la carte, trait littoral compris — en SVG, une règle
+                // CSS prime toujours sur un attribut de présentation, même
+                // posé après coup en JS, donc `setAttribute('stroke', ...)`
+                // était silencieusement écrasé par cette règle. `style`
+                // inline a une priorité supérieure à la feuille de styles et
+                // n'est pas concerné par ce piège.
                 if (level > 0) {
                     // Liseré sombre sous le trait coloré : sur une carte de
                     // la France entière (viewBox 1000, rendue sur quelques
@@ -690,24 +700,19 @@
                     // palier se fondait dans le fond clair et la frontière
                     // départementale déjà présente au même endroit — trop
                     // discret pour être vu sans zoomer fortement.
-                    littoralOverlayGroup.appendChild(createSvgElement('path', {
-                        d: d,
-                        fill: 'none',
-                        stroke: '#1c1f26',
-                        'stroke-width': width + 4,
-                        'stroke-linecap': 'round',
-                        'stroke-linejoin': 'round'
-                    }));
+                    var casing = createSvgElement('path', { d: d, fill: 'none' });
+                    casing.style.stroke = '#1c1f26';
+                    casing.style.strokeWidth = (width + 4) + 'px';
+                    casing.style.strokeLinecap = 'round';
+                    casing.style.strokeLinejoin = 'round';
+                    littoralOverlayGroup.appendChild(casing);
                 }
-                var path = createSvgElement('path', {
-                    d: d,
-                    fill: 'none',
-                    stroke: level > 0 ? color : '#5b6b7a',
-                    'stroke-width': width,
-                    'stroke-linecap': 'round',
-                    'stroke-linejoin': 'round',
-                    opacity: level > 0 ? 1 : 0.55
-                });
+                var path = createSvgElement('path', { d: d, fill: 'none' });
+                path.style.stroke = level > 0 ? color : '#5b6b7a';
+                path.style.strokeWidth = width + 'px';
+                path.style.strokeLinecap = 'round';
+                path.style.strokeLinejoin = 'round';
+                path.style.opacity = level > 0 ? 1 : 0.55;
                 littoralOverlayGroup.appendChild(path);
             });
         }
