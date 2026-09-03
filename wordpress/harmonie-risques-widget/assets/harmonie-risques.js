@@ -65,6 +65,11 @@
             { tag: 'line', x1: 2.5, y1: 12, x2: 21.5, y2: 12, stroke: 'currentColor', 'stroke-width': 2.2, 'stroke-linecap': 'round' },
             { tag: 'line', x1: 4, y1: 17, x2: 20, y2: 17, stroke: 'currentColor', 'stroke-width': 2.2, 'stroke-linecap': 'round' }
         ],
+        littoral: [
+            { tag: 'path', d: 'M2 8c2 0 2-2.2 4-2.2s2 2.2 4 2.2 2-2.2 4-2.2 2 2.2 4 2.2 2-2.2 4-2.2', stroke: 'currentColor', 'stroke-width': 1.8, 'stroke-linecap': 'round', fill: 'none' },
+            { tag: 'path', d: 'M2 13.5c2 0 2-2.2 4-2.2s2 2.2 4 2.2 2-2.2 4-2.2 2 2.2 4 2.2 2-2.2 4-2.2', stroke: 'currentColor', 'stroke-width': 1.8, 'stroke-linecap': 'round', fill: 'none' },
+            { tag: 'path', d: 'M2 19c2 0 2-2.2 4-2.2s2 2.2 4 2.2 2-2.2 4-2.2 2 2.2 4 2.2 2-2.2 4-2.2', stroke: 'currentColor', 'stroke-width': 1.8, 'stroke-linecap': 'round', fill: 'none' }
+        ],
         feu: [
             { tag: 'path', d: 'M12 2c1.6 2.8 1 4.6-.3 6.4-1.1 1.5-2.4 3-2.4 5.3a3.7 3.7 0 0 0 7.4 0c0-1.4-.5-2.3-1-3.1.2 1.2-.4 2-.4 2 .5-2.6-.9-4.4-1.7-5.6.2 1-.3 1.6-.3 1.6.4-2.6-.6-4.4-1.3-6.6z', fill: 'currentColor' },
             { tag: 'path', d: 'M11.2 22c-2.6 0-4.6-1.8-4.6-4.3 0-1.6.8-2.8 1.6-3.7-.2 1.3.3 2.1.3 2.1-.3-1.8.7-3 1.5-3.8-.1 1 .2 1.6.2 1.6 0-1.6 1-2.6 1-2.6-.6 1.8.2 3 .2 3 .7.4 1.2 1.2 1.2 2.2 0 1.6-1 2.5-1.4 3.5.6-.2 1.1-.6 1.4-1.1-.1 1.8-1.5 3.1-3.4 3.1z', fill: 'currentColor', opacity: '.55' }
@@ -149,9 +154,15 @@
             'Les conditions météo peuvent légèrement favoriser le développement d’un feu. Respectez les consignes locales.',
             'Les conditions météo peuvent favoriser le développement d’un feu. Respectez les consignes locales et évitez tout départ de flamme.',
             'Les conditions météo sont très favorables au développement et à la propagation d’un feu. Soyez extrêmement vigilant et respectez strictement les interdictions locales.'
+        ],
+        littoral: [
+            'Des rafales et une mer agitée sont possibles sur le littoral. Restez prudent en bord de mer.',
+            'De fortes rafales accompagnées d’une dépression marquée sont attendues sur le littoral, avec un risque de mer forte à très forte. Éloignez-vous du bord de mer et des ouvrages exposés.',
+            'De violentes rafales et une tempête marquée sont attendues sur le littoral, avec un risque de submersion. Évitez tout déplacement en bord de mer et suivez les consignes des autorités.'
         ]
     };
     var FEU_DISCLAIMER = 'Important : ce niveau mesure seulement le cocktail météo chaleur, humidité, vent et pluie. Il reste non officiel et ne remplace pas la Météo des forêts.';
+    var LITTORAL_DISCLAIMER = 'Important : ce niveau mesure seulement les rafales et la pression (pas de données de vagues, marée ni surcote). Il reste non officiel et ne remplace pas la Vigilance vagues-submersion de Météo-France.';
 
     function whenReady(callback) {
         if (document.readyState === 'loading') {
@@ -339,10 +350,30 @@
     }
 
     function zonedDateKey(iso, tz) {
-        var meteorologicalDate = new Date(new Date(iso).getTime() - 6 * 60 * 60 * 1000);
+        // Journée « météo » : se termine à 6h du matin plutôt qu'à minuit,
+        // J+1 reprend à 6h — les heures 0h-6h restent rattachées à la
+        // journée précédente. Même décalage appliqué côté pipeline Python
+        // (cf. _effective_date dans update_risques.py) pour que la frise
+        // et le badge du jour restent cohérents entre eux.
+        var shifted = new Date(new Date(iso).getTime() - 6 * 60 * 60 * 1000);
         return new Intl.DateTimeFormat('en-CA', {
             timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit'
-        }).format(meteorologicalDate);
+        }).format(shifted);
+    }
+
+    // Notation météo « Xz JJ/MM » (ex. « 21z 27/08 ») pour le cycle du
+    // modèle, en plus du format « JJ/MM HH:MM UTC » déjà affiché — calculée
+    // à partir du même run_time publié, donc toujours à jour automatiquement.
+    function zNotation(date) {
+        var parts = new Intl.DateTimeFormat('en-GB', {
+            timeZone: 'UTC', hourCycle: 'h23',
+            hour: '2-digit', day: '2-digit', month: '2-digit'
+        }).formatToParts(date);
+        var get = function (type) {
+            var part = parts.filter(function (p) { return p.type === type; })[0];
+            return part ? part.value : '';
+        };
+        return get('hour') + 'z ' + get('day') + '/' + get('month');
     }
 
     function initApp(app) {
@@ -358,6 +389,7 @@
         var runMeta = app.querySelector('[data-hrw-run]');
         var generated = app.querySelector('[data-hrw-generated]');
         var nationalSummaryBox = app.querySelector('[data-hrw-national-summary]');
+        var summaryTitle = app.querySelector('[data-hrw-national-summary-title]');
         var summaryMax = app.querySelector('[data-hrw-summary-max]');
         var summaryMin = app.querySelector('[data-hrw-summary-min]');
         var summaryGust = app.querySelector('[data-hrw-summary-gust]');
@@ -418,10 +450,38 @@
             return hourPart ? Number(hourPart.value) : 0;
         }
 
+        // La journée météo change à 6h (cf. _effective_date côté pipeline
+        // Python) — un onglet laissé ouvert à cheval sur cette limite doit
+        // basculer tout seul sur la carte suivante plutôt que de rester
+        // figé sur les données de la veille jusqu'à un rechargement manuel.
+        // Un rechargement complet plutôt qu'un nouveau fetch en place :
+        // beaucoup plus simple et sûr que de rejouer toute la séquence
+        // d'initialisation (carte, onglets, etc.) une seconde fois sans
+        // dupliquer d'écouteurs d'évènements.
+        function scheduleNextDayBoundaryReload() {
+            var parts = new Intl.DateTimeFormat('en-GB', {
+                timeZone: timezone, hourCycle: 'h23',
+                hour: '2-digit', minute: '2-digit', second: '2-digit'
+            }).formatToParts(new Date());
+            var get = function (type) {
+                var part = parts.filter(function (p) { return p.type === type; })[0];
+                return part ? Number(part.value) : 0;
+            };
+            var secondsSinceMidnight = get('hour') * 3600 + get('minute') * 60 + get('second');
+            var boundarySeconds = 6 * 3600;
+            var secondsUntilBoundary = boundarySeconds - secondsSinceMidnight;
+            if (secondsUntilBoundary <= 0) {
+                secondsUntilBoundary += 24 * 3600;
+            }
+            window.setTimeout(function () {
+                window.location.reload();
+            }, secondsUntilBoundary * 1000);
+        }
+
         function levelInfo(hazard, level) {
             var scale = manifest && manifest.hazard_levels ? manifest.hazard_levels[hazard] : null;
             var info = scale ? scale[String(level)] : null;
-            return info || { label: 'Inconnu', color: '#555' };
+            return info || { label: 'Inconnu', color: '#555', text_color: '#ffffff' };
         }
 
         function maxLevelFor(hazard) {
@@ -441,6 +501,16 @@
 
         function hazardLabel(hazard) {
             return (manifest && manifest.hazards && manifest.hazards[hazard]) || hazard;
+        }
+
+        // Sépare « Modérée (≥ 28 °C) » en un mot principal + un seuil
+        // entre parenthèses, pour les afficher sur deux lignes (mot en
+        // gras, seuil plus petit en dessous) plutôt qu'à la suite sur une
+        // seule ligne dans une case étroite — un seul long fragment de
+        // texte y était illisible même sans le suffixe « (X/N) ».
+        function splitHazardLabel(label) {
+            var match = /^(.*?)\s(\([^)]*\))$/.exec(label);
+            return match ? { main: match[1], sub: match[2] } : { main: label, sub: '' };
         }
 
         function departmentLevel(code, hazard, dayIndex) {
@@ -471,15 +541,36 @@
             });
         }
 
+        // Le pire niveau trouvé n'importe où en France pour l'aléa/jour
+        // courants — un indicateur national, pas celui d'un département
+        // (peu importe lequel est sélectionné). Avant ce correctif le
+        // texte était figé sur « 0/N » quel que soit le contenu réel de la
+        // carte.
+        function nationalMaxLevel(hazard, dayIndex) {
+            var max = 0;
+            if (!manifest || !manifest.departments) { return max; }
+            Object.keys(manifest.departments).forEach(function (code) {
+                var level = departmentLevel(code, hazard, dayIndex);
+                if (level > max) { max = level; }
+            });
+            return max;
+        }
+
+        function updateLegendTitle() {
+            if (!legendTitle) { return; }
+            var maxLevel = maxLevelFor(currentHazard);
+            var label = hazardLabel(currentHazard);
+            var national = nationalMaxLevel(currentHazard, currentDayIndex);
+            legendTitle.textContent = label + ' ' + national + '/' + maxLevel;
+        }
+
         function buildLegend() {
             // L'échelle (nombre de paliers, libellés) dépend de l'aléa
             // affiché — la légende est donc reconstruite à chaque
             // changement d'aléa plutôt que dessinée une seule fois.
             legend.replaceChildren();
             var maxLevel = maxLevelFor(currentHazard);
-            if (legendTitle) {
-                legendTitle.textContent = hazardLabel(currentHazard) + ' 0/' + maxLevel;
-            }
+            updateLegendTitle();
             for (var level = 0; level <= maxLevel; level++) {
                 var info = levelInfo(currentHazard, level);
                 var item = document.createElement('div');
@@ -518,7 +609,7 @@
             var department = manifest && manifest.departments ? manifest.departments[selectedDepartment || Object.keys(manifest.departments)[0]] : null;
             var daily = department ? department.daily : [];
             var formatter = dayFormatter();
-            var labels = ['J0', 'J1', 'J2', 'J3', 'J4'];
+            var labels = ['J0', 'J+1', 'J+2', 'J+3', 'J+4'];
             daily.forEach(function (entry, index) {
                 var date = new Date(entry.date + 'T12:00:00Z');
                 var button = document.createElement('button');
@@ -531,18 +622,6 @@
                 });
                 dayTabs.appendChild(button);
             });
-        }
-
-        function selectCurrentMeteorologicalDay() {
-            var department = manifest && manifest.departments
-                ? manifest.departments[selectedDepartment || Object.keys(manifest.departments)[0]]
-                : null;
-            var daily = department ? department.daily : [];
-            var today = zonedDateKey(new Date().toISOString(), timezone);
-            var todayIndex = daily.findIndex(function (entry) {
-                return entry && entry.date === today;
-            });
-            currentDayIndex = todayIndex >= 0 ? todayIndex : 0;
         }
 
         function setHazard(hazard) {
@@ -562,7 +641,9 @@
                 button.classList.toggle('is-active', i === index);
             });
             paintMap();
+            updateLegendTitle();
             renderDetail();
+            renderNationalSummary();
         }
 
         function selectDepartment(code) {
@@ -571,6 +652,7 @@
             }
             selectedDepartment = code;
             paintMap();
+            updateLegendTitle();
             buildDayTabs();
             renderDetail();
         }
@@ -608,7 +690,28 @@
                 var levelSpan = document.createElement('span');
                 levelSpan.className = 'hrw-hazard-level';
                 levelSpan.style.backgroundColor = info.color;
-                levelSpan.textContent = info.label + levelSuffix(hazard, level);
+                levelSpan.style.color = info.text_color;
+                // Pas de « (X/N) » ici : la case est trop étroite pour
+                // l'empiler avec un libellé à seuil déjà entre parenthèses
+                // (ex. « Modérée (≥ 28 °C) (2/7) ») — illisible, deux
+                // groupes de parenthèses collés. Le rang complet reste
+                // visible dans l'infobulle de la carte et celle de la
+                // frise. Le mot et le seuil sont en plus séparés sur deux
+                // lignes (mot en gras, seuil plus petit) : à la suite sur
+                // une seule ligne, ça restait illisible dans une case
+                // aussi étroite même sans le suffixe.
+                var parts = splitHazardLabel(info.label);
+                var mainLine = document.createElement('span');
+                mainLine.className = 'hrw-hazard-level-main';
+                mainLine.textContent = parts.main;
+                levelSpan.appendChild(mainLine);
+                if (parts.sub) {
+                    levelSpan.appendChild(document.createElement('br'));
+                    var subLine = document.createElement('span');
+                    subLine.className = 'hrw-hazard-level-sub';
+                    subLine.textContent = parts.sub;
+                    levelSpan.appendChild(subLine);
+                }
                 cell.appendChild(name2);
                 cell.appendChild(document.createElement('br'));
                 cell.appendChild(levelSpan);
@@ -645,6 +748,8 @@
 
             if (detailHazard === 'feu') {
                 message += ' ' + FEU_DISCLAIMER;
+            } else if (detailHazard === 'littoral') {
+                message += ' ' + LITTORAL_DISCLAIMER;
             }
             adviceText.textContent = message;
         }
@@ -668,14 +773,15 @@
                 return;
             }
 
-            // La frise doit toujours partir de minuit (0h), même le jour où
-            // le run HARMONIE lui-même n'a démarré que plus tard (ex. un run
-            // lancé à 9h ne peut pas avoir de données pour 0h-8h ce jour-là)
-            // — sinon la première case affichée n'était pas 0h mais l'heure
-            // de départ réelle du run, ce qui semblait être un bug. On
-            // construit donc les 24 cases une par une par heure locale, avec
-            // une case « pas de données » pour les heures manquantes,
-            // plutôt que de se contenter des entrées réellement présentes.
+            // La frise doit toujours partir de 6h (début de la journée
+            // météo), même le jour où le run HARMONIE lui-même n'a démarré
+            // que plus tard (ex. un run lancé à 9h ne peut pas avoir de
+            // données pour 6h-8h ce jour-là) — sinon la première case
+            // affichée n'était pas 6h mais l'heure de départ réelle du run,
+            // ce qui semblait être un bug. On construit donc les 24 cases
+            // une par une par heure locale, avec une case « pas de
+            // données » pour les heures manquantes, plutôt que de se
+            // contenter des entrées réellement présentes.
             var hourMap = {};
             dayHours.forEach(function (entry) {
                 hourMap[localHourOf(new Date(entry.time))] = entry;
@@ -711,12 +817,20 @@
                 }
             }
 
-            for (var hour = 0; hour <= 23; hour++) {
+            // Journée « météo » 6h → 6h (pas minuit → minuit) : l'ordre
+            // d'affichage suit ce même décalage, sinon les heures 0h-5h du
+            // lendemain (incluses dans CETTE journée par zonedDateKey)
+            // apparaîtraient avant 6h-23h alors qu'elles sont
+            // chronologiquement après.
+            for (var hour = 6; hour <= 23; hour++) {
                 appendCell(hour, hourMap[hour] || null);
             }
-            // Case de clôture « 0h » du lendemain, pour boucler l'affichage
-            // 0h → 21h → 0h comme sur la maquette fournie.
-            appendCell(0, closingEntry);
+            for (var hour2 = 0; hour2 <= 5; hour2++) {
+                appendCell(hour2, hourMap[hour2] || null);
+            }
+            // Case de clôture « 6h » du lendemain, pour boucler l'affichage
+            // 6h → 5h → 6h.
+            appendCell(6, closingEntry);
 
             renderAdvice(dayEntry.hazards[detailHazard] || 0);
         }
@@ -728,7 +842,7 @@
         function renderNationalSummary() {
             if (!nationalSummaryBox) { return; }
             var entry = manifest && Array.isArray(manifest.national_summary)
-                ? manifest.national_summary[0]
+                ? manifest.national_summary[currentDayIndex]
                 : null;
             if (!entry) {
                 nationalSummaryBox.hidden = true;
@@ -741,10 +855,42 @@
                 return field.value.toFixed(decimals) + unit + ' (' + deptName + ')';
             }
 
-            if (summaryMax) { summaryMax.textContent = label(entry.max_temperature, '°C', 1); }
-            if (summaryMin) { summaryMin.textContent = label(entry.min_temperature, '°C', 1); }
-            if (summaryGust) { summaryGust.textContent = label(entry.max_gust, ' km/h', 0); }
-            if (summaryPrecip) { summaryPrecip.textContent = label(entry.max_precip, ' mm', 1); }
+            // Seuils d'alerte visuelle (pas les seuils de vigilance officielle,
+            // juste un repère pour attirer l'œil sur une valeur nationale du
+            // jour qui sort du lot). « extreme » = valeur au-delà du seuil ;
+            // « bas » pour le mini uniquement, où c'est le froid qui est
+            // extrême, pas la chaleur.
+            function markExtreme(el, field, isExtreme) {
+                if (!el) { return; }
+                el.classList.toggle('hrw-summary-extreme', !!(field && isExtreme(field.value)));
+            }
+
+            if (summaryTitle) {
+                var labels = ['J0', 'J+1', 'J+2', 'J+3', 'J+4'];
+                var dayLabel = labels[currentDayIndex] || ('J' + currentDayIndex);
+                var dateText = '';
+                if (entry.date) {
+                    var date = new Date(entry.date + 'T12:00:00Z');
+                    dateText = ' · ' + dayFormatter().format(date);
+                }
+                summaryTitle.textContent = 'France — ' + dayLabel + dateText;
+            }
+            if (summaryMax) {
+                summaryMax.textContent = label(entry.max_temperature, '°C', 1);
+                markExtreme(summaryMax, entry.max_temperature, function (v) { return v >= 35; });
+            }
+            if (summaryMin) {
+                summaryMin.textContent = label(entry.min_temperature, '°C', 1);
+                markExtreme(summaryMin, entry.min_temperature, function (v) { return v <= -5; });
+            }
+            if (summaryGust) {
+                summaryGust.textContent = label(entry.max_gust, ' km/h', 0);
+                markExtreme(summaryGust, entry.max_gust, function (v) { return v >= 100; });
+            }
+            if (summaryPrecip) {
+                summaryPrecip.textContent = label(entry.max_precip, ' mm', 1);
+                markExtreme(summaryPrecip, entry.max_precip, function (v) { return v >= 50; });
+            }
             nationalSummaryBox.hidden = false;
         }
 
@@ -801,6 +947,7 @@
             var chip = document.createElement('div');
             chip.className = 'hrw-tooltip-chip';
             chip.style.backgroundColor = info.color;
+            chip.style.color = info.text_color;
             chip.textContent = hazardLabel(currentHazard) + ' — ' + info.label + levelSuffix(currentHazard, level);
             tooltip.appendChild(chip);
 
@@ -1107,7 +1254,9 @@
                                 throw new Error('Position hors couverture');
                             }
                             var candidate = candidates[0];
-                            input.value = candidate.nom;
+                            if (input) {
+                                input.value = candidate.nom;
+                            }
                             selectDepartment(String(candidate.codeDepartement || '').toUpperCase());
                         })
                         .catch(function () {})
@@ -1123,6 +1272,10 @@
         }
 
         // --- Chargement initial.
+        if (window.HRW_AUTOHEAL && window.HRW_AUTOHEAL.url) {
+            fetch(window.HRW_AUTOHEAL.url, { method: 'POST', cache: 'no-store' }).catch(function () {});
+        }
+
         if (!baseUrl) {
             mapLoading.textContent = 'Adresse des données de risques non configurée.';
             return;
@@ -1138,6 +1291,22 @@
         }
         window.addEventListener('resize', scheduleWiden);
 
+        // Les délais fixes ci-dessous ne suffisent pas si la mise en page
+        // du thème bouge après coup (polices qui finissent de charger,
+        // widgets Avada chargés en différé, etc.) : on observe aussi la
+        // largeur réelle des ancêtres pour relancer l'agrandissement à
+        // chaque changement, sans dépendre d'un minutage fixe.
+        if (window.ResizeObserver) {
+            var widenObserver = new ResizeObserver(scheduleWiden);
+            var observedEl = app.parentElement;
+            var observedHops = 0;
+            while (observedEl && observedHops < 6) {
+                widenObserver.observe(observedEl);
+                observedEl = observedEl.parentElement;
+                observedHops += 1;
+            }
+        }
+
         Promise.all([
             fetchJson(baseUrl + '/risques.json'),
             fetchText(geojsonUrl).then(function (text) { return JSON.parse(text); })
@@ -1147,7 +1316,6 @@
             if (!manifest || manifest.status !== 'ok') {
                 throw new Error('Manifeste de risques invalide');
             }
-            selectCurrentMeteorologicalDay();
             buildMap(geojson);
             buildLegend();
             buildHazardTabs();
@@ -1157,10 +1325,10 @@
 
             if (manifest.run_time) {
                 var runDate = new Date(manifest.run_time);
-                runMeta.textContent = 'Run HARMONIE du ' +
+                runMeta.textContent = 'Run HARMONIE-AROME du ' +
                     new Intl.DateTimeFormat('fr-FR', {
                         day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', timeZone: 'UTC'
-                    }).format(runDate) + ' UTC';
+                    }).format(runDate) + ' UTC (Run ' + zNotation(runDate) + ')';
             }
             if (manifest.generated_at) {
                 generated.textContent = 'Risques calculés le ' +
@@ -1176,6 +1344,8 @@
             [300, 1000, 2500].forEach(function (delay) {
                 window.setTimeout(function () { widenToFitAncestor(app); }, delay);
             });
+
+            scheduleNextDayBoundaryReload();
         }).catch(function (error) {
             mapLoading.textContent = 'Les données de vigilance ne sont pas encore disponibles : ' + error.message;
         });

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Calcule une carte de vigilance météo (10 aléas, échelle propre à chaque
+"""Calcule une carte de vigilance météo (11 aléas, échelle propre à chaque
 aléa, non officielle) à partir des fichiers départementaux déjà publiés par
 le hub `harmonie`.
 
@@ -43,7 +43,7 @@ except ImportError:  # pragma: no cover - Python < 3.9 non pris en charge ici
 
 
 LOGGER = logging.getLogger("risques")
-PIPELINE_VERSION = "2.15.0"
+PIPELINE_VERSION = "2.16.0"
 PARIS_TZ = ZoneInfo("Europe/Paris") if ZoneInfo is not None else timezone.utc
 # La journée météo va de 6 h à 6 h en Europe/Paris. Les heures comprises
 # entre minuit et 6 h restent donc rattachées à la journée précédente.
@@ -71,8 +71,19 @@ HAZARDS = (
     "neige",
     "verglas",
     "brouillard",
+    "littoral",
     "feu",
 )
+
+# Départements côtiers (métropole, façades Manche/Atlantique/Méditerranée +
+# Corse) — seuls ces départements peuvent afficher un niveau non nul pour
+# l'aléa Littoral, cf. LITTORAL_THRESHOLDS_KMH plus bas.
+LITTORAL_DEPARTMENTS = frozenset({
+    "59", "62", "80", "76", "14", "50", "35", "22", "29", "56",
+    "44", "85", "17", "33", "40", "64",
+    "66", "11", "34", "30", "13", "83", "06",
+    "2A", "2B",
+})
 
 # L'ordre d'affichage (onglets, grille de détail) suit l'ordre d'insertion
 # de ce dict, propagé tel quel dans le JSON (``manifest.hazards``) puis lu
@@ -88,6 +99,7 @@ HAZARD_LABELS = {
     "neige": "Neige",
     "verglas": "Verglas",
     "brouillard": "Brouillard",
+    "littoral": "Littoral",
     "feu": "Feu",
 }
 
@@ -203,6 +215,9 @@ HAZARD_LEVELS: dict[str, list[str]] = {
         "Pluie verglaçante durable",
     ],
     "brouillard": ["Nul", "Faible", "Modéré", "Fort", "Sévère"],
+    # Littoral : à seuils numériques (rafales), construit plus bas comme
+    # Vent/Pluie à partir de LITTORAL_THRESHOLDS_KMH.
+    "littoral": [],
     # Feu : inchangé, 0-4 générique.
     "feu": ["Nul", "Faible", "Modéré", "Fort", "Sévère"],
 }
@@ -255,6 +270,11 @@ def hazard_levels_manifest() -> dict[str, dict[str, dict[str, str]]]:
 FIRE_DISCLAIMER = (
     "Indice non officiel (cocktail météo chaleur/humidité/vent/pluie). "
     "Ne remplace pas Météo des forêts."
+)
+LITTORAL_DISCLAIMER = (
+    "Indice non officiel (rafales et pression, sans donnée de vagues, "
+    "marée ni surcote). Ne remplace pas la Vigilance vagues-submersion "
+    "de Météo-France."
 )
 
 
@@ -599,6 +619,13 @@ CHALEUR_THRESHOLDS = (25.0, 28.0, 31.0, 34.0, 37.0, 40.0, 45.0)
 # rester comme palier « Extrême » le plus haut.
 PLUIE_THRESHOLDS_MM = (5.0, 15.0, 30.0, 50.0, 80.0, 150.0, 300.0, 500.0)
 VENT_THRESHOLDS_KMH = (80.0, 90.0, 100.0, 110.0, 130.0, 150.0, 180.0)
+# Littoral : indice non officiel (pas de vagues/marée/surcote dans HARMONIE),
+# cocktail rafale + pression basse sur les départements côtiers uniquement
+# (cf. LITTORAL_DEPARTMENTS) — mêmes seuils de rafale que Vent, avec un cran
+# supplémentaire si une dépression marquée (signature de tempête) accompagne
+# le vent, cf. hourly_hazard_levels.
+LITTORAL_THRESHOLDS_KMH = (60.0, 70.0, 80.0, 90.0, 110.0, 130.0, 150.0)
+LITTORAL_STORM_PRESSURE_HPA = 990.0
 NEIGE_THRESHOLDS_CM = (1.0, 3.0, 7.0, 15.0, 30.0, 50.0)
 # ``_threshold_level_below`` a besoin de l'ordre inverse (du seuil le plus
 # « chaud »/le moins sévère au plus froid) — cf. sa docstring.
@@ -612,6 +639,7 @@ FROID_THRESHOLDS_BELOW = (-3.0, -6.0, -10.0, -15.0, -20.0, -30.0)
 # seuils à deux endroits).
 HAZARD_LEVELS["pluie_inondation"] = _numeric_tier_labels(PLUIE_THRESHOLDS_MM, "mm", bare=True)
 HAZARD_LEVELS["vent"] = _numeric_tier_labels(VENT_THRESHOLDS_KMH, "km/h", bare=True)
+HAZARD_LEVELS["littoral"] = _numeric_tier_labels(LITTORAL_THRESHOLDS_KMH, "km/h", bare=True)
 HAZARD_LEVELS["neige"] = _numeric_tier_labels(NEIGE_THRESHOLDS_CM, "cm")
 HAZARD_LEVELS["froid"] = _numeric_tier_labels(FROID_THRESHOLDS_BELOW, "°C", below=True)
 
@@ -678,6 +706,7 @@ def hourly_hazard_levels(
     wind_gust = col("wind_gust_kmh")
     visibility = col("visibility_km")
     precipitation_now = col("precipitation_mm")
+    pressure = col("pressure_hpa")
 
     # Rafales (Vent) et température minimale (Froid/gel) : un sommet ou un
     # col de haute montagne n'est représentatif d'aucune zone habitée —
@@ -697,6 +726,7 @@ def hourly_hazard_levels(
     max_gust = _nanpercentile_high(wind_gust_populated)
     min_visibility = _nanpercentile_low(visibility)
     precip_now_repr = _nanpercentile_high(precipitation_now)
+    min_pressure = _nanpercentile_low(pressure)
 
     # Brouillard : la visibilité seule ne suffit pas à distinguer un vrai
     # brouillard (air saturé, calme) d'une simple visibilité réduite par la
@@ -763,6 +793,17 @@ def hourly_hazard_levels(
     if not np.isfinite(precip_now_repr) or precip_now_repr < 0.1:
         grele_level = 0
 
+    # Littoral : indice non officiel, restreint aux départements côtiers
+    # (cf. LITTORAL_DEPARTMENTS) — rafale (même filtre altitude que Vent) et
+    # un cran de plus si une dépression marquée accompagne le vent (signature
+    # de tempête, proxy de surcote en l'absence de toute donnée de marée ou
+    # de vagues dans HARMONIE).
+    littoral_level = 0
+    if series.code in LITTORAL_DEPARTMENTS:
+        littoral_level = _threshold_level(max_gust, LITTORAL_THRESHOLDS_KMH)
+        if littoral_level > 0 and np.isfinite(min_pressure) and min_pressure <= LITTORAL_STORM_PRESSURE_HPA:
+            littoral_level = min(len(LITTORAL_THRESHOLDS_KMH), littoral_level + 1)
+
     fog_level = _threshold_level_below(min_visibility, (1.0, 0.5, 0.2, 0.1))
     if fog_level > 0:
         is_saturated = (
@@ -797,6 +838,7 @@ def hourly_hazard_levels(
         "chaleur": _threshold_level(max_temperature, CHALEUR_THRESHOLDS),
         "froid": _threshold_level_below(min_temperature, FROID_THRESHOLDS_BELOW),
         "brouillard": fog_level,
+        "littoral": littoral_level,
         "feu": fire_level,
     }
     return hazards, raw_extremes
@@ -1159,6 +1201,7 @@ def build_risques(
         "hazards": HAZARD_LABELS,
         "hazard_levels": hazard_levels_manifest(),
         "fire_disclaimer": FIRE_DISCLAIMER,
+        "littoral_disclaimer": LITTORAL_DISCLAIMER,
         "national_summary": national_summary,
         "departments": departments,
     }

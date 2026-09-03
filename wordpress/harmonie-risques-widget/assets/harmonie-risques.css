@@ -57,17 +57,28 @@
     display: flex;
     flex-wrap: wrap;
     align-items: flex-start;
-    justify-content: space-between;
     gap: 14px;
 }
 
+/* space-between (avant) redistribuait l'espace entre TOUS les enfants dès
+   que la largeur de l'un d'eux changeait — les valeurs du résumé national
+   changent de longueur selon le jour sélectionné (nombres, noms de
+   départements différents), ce qui faisait visiblement « bouger » le bloc
+   recherche à côté. Avec flex-start + cette marge, seul ce bloc se
+   déplace (plaqué à droite), les autres restent fixes quel que soit son
+   contenu. */
+/* Largeur FIXE (pas juste min-width) : les valeurs (chiffres + noms de
+   département) changent de longueur d'un jour à l'autre, et une largeur
+   qui suit le contenu faisait visiblement « sauter » la taille du bloc au
+   changement de jour, même une fois sa position stabilisée ci-dessus. */
 .hrw-national-summary {
     flex: 0 0 auto;
+    margin-left: auto;
+    width: 460px;
     padding: 10px 14px;
     border: 1px solid var(--hrw-border);
     border-radius: 10px;
     background: var(--hrw-panel);
-    min-width: 190px;
 }
 
 .hrw-national-summary-title {
@@ -106,46 +117,56 @@
     white-space: nowrap;
 }
 
+.hrw-summary-extreme {
+    color: #cc0000;
+}
+
+/* À côté du bloc titre, dans l'en-tête. */
 .hrw-search {
     position: relative;
-    display: flex;
-    flex-wrap: wrap;
-    align-items: flex-end;
-    gap: 12px;
-    padding: 16px 24px;
-    border-bottom: 1px solid var(--hrw-border);
+    flex: 1 1 420px;
+    max-width: 560px;
 }
 
 .hrw-search label {
     display: block;
     margin-bottom: 6px;
-    font-size: .78rem;
+    font-size: .9rem;
     font-weight: 700;
     color: var(--hrw-muted);
 }
 
+.hrw-search-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: stretch;
+    gap: 8px;
+}
+
+/* Le champ prend toute la largeur de la ligne — le bouton géolocaliser
+   passe dessous plutôt que de se partager la place avec lui. */
 .hrw-search-control {
     position: relative;
-    min-width: 260px;
-    flex: 1 1 260px;
+    flex: 1 1 100%;
 }
 
 .hrw-search-icon {
     position: absolute;
     top: 50%;
-    left: 12px;
+    left: 14px;
     transform: translateY(-50%);
     color: var(--hrw-muted);
+    font-size: 1.1rem;
 }
 
 .hrw-city-input {
     width: 100%;
-    padding: 10px 12px 10px 34px;
+    padding: 13px 14px 13px 40px;
     border: 1px solid var(--hrw-border);
     border-radius: 10px;
     background: var(--hrw-panel);
     color: var(--hrw-text);
-    font-size: .95rem;
+    font-size: 1.05rem;
 }
 
 .hrw-city-input:focus {
@@ -154,11 +175,14 @@
 }
 
 .hrw-locate-button {
-    padding: 10px 14px;
+    display: inline-block;
+    margin-top: 10px;
+    padding: 10px 18px;
     border: 1px solid var(--hrw-border);
     border-radius: 10px;
     background: var(--hrw-panel-alt);
     color: var(--hrw-text);
+    font-size: .95rem;
     font-weight: 700;
     cursor: pointer;
 }
@@ -292,10 +316,28 @@
     stroke-width: 1;
     cursor: pointer;
     transition: filter .12s ease;
+    /* Sans ça, un tap sur mobile affiche le rectangle de surbrillance par
+       défaut du navigateur (souvent gris/noir foncé), dimensionné sur la
+       boîte englobante du <path> plutôt que sa forme réelle — visible
+       comme un « gros carré noir » sur un département au tracé irrégulier. */
+    -webkit-tap-highlight-color: transparent;
 }
 
 .hrw-map path:hover {
     filter: brightness(.94);
+}
+
+/* Le clic donne le focus au <path> (role="button" tabindex="0"), et sans
+   ça le navigateur dessine son contour de focus par défaut — un rectangle
+   noir calé sur la boîte englobante du département plutôt que sa forme
+   réelle (constaté en production : visible comme un « gros carré noir »
+   entourant le département cliqué). La sélection est déjà indiquée par le
+   contour bleu de .is-selected ci-dessous, qui lui suit la vraie forme —
+   pas besoin du contour de focus par-dessus, pour la souris/tactile comme
+   au clavier (Entrée/Espace passe par le même chemin de sélection). */
+.hrw-map path:focus,
+.hrw-map path:focus-visible {
+    outline: none !important;
 }
 
 .hrw-map path.is-selected {
@@ -316,14 +358,23 @@
 }
 
 .hrw-map-inset-wrap {
-    flex: 0 0 26%;
-    max-width: 210px;
-    min-width: 130px;
     padding: 8px;
     border: 1px solid var(--hrw-border);
     border-radius: 10px;
     background: var(--hrw-bg);
     box-shadow: 0 6px 18px rgba(15, 23, 42, .1);
+}
+
+/* Colonne commune à la carte Île-de-France et au bloc d'outils
+   (capture/copie), qui reste un bloc séparé juste en dessous plutôt que
+   d'être inséré dans le cadre de la carte elle-même. */
+.hrw-map-inset-column {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    flex: 0 0 26%;
+    max-width: 210px;
+    min-width: 130px;
 }
 
 .hrw-inset-map {
@@ -338,10 +389,16 @@
     stroke-width: 1.4;
     cursor: pointer;
     transition: filter .12s ease;
+    -webkit-tap-highlight-color: transparent;
 }
 
 .hrw-inset-map path:hover {
     filter: brightness(.94);
+}
+
+.hrw-inset-map path:focus,
+.hrw-inset-map path:focus-visible {
+    outline: none !important;
 }
 
 .hrw-inset-map path.is-selected {
@@ -430,21 +487,19 @@
     pointer-events: none;
 }
 
+/* Sous le bloc Capture PNG / Copier la vue, plutôt qu'en incrustation sur
+   la carte elle-même. */
 .hrw-legend-title {
-    position: absolute;
-    top: 8px;
-    left: 8px;
-    z-index: 5;
     margin: 0;
-    padding: 5px 12px;
+    padding: 8px 12px;
     border: 1px solid var(--hrw-border);
-    border-radius: 8px;
-    background: rgba(255, 255, 255, .92);
-    box-shadow: 0 4px 12px rgba(15, 23, 42, .12);
-    font-size: 1.05rem;
+    border-radius: 10px;
+    background: var(--hrw-bg);
+    box-shadow: 0 6px 18px rgba(15, 23, 42, .1);
+    font-size: 1rem;
     font-weight: 800;
     color: var(--hrw-text);
-    pointer-events: none;
+    text-align: center;
 }
 
 .hrw-legend {
@@ -469,19 +524,28 @@
     border: 1px solid var(--hrw-border);
 }
 
+/* Bloc séparé (bordure/fond propres), juste sous la carte Île-de-France
+   dans la même colonne étroite, plutôt qu'en pleine largeur sous les deux
+   cartes ou fondu dans le cadre de la carte elle-même. */
 .hrw-map-tools {
     display: flex;
-    gap: 8px;
-    margin-top: 12px;
+    flex-direction: column;
+    gap: 6px;
+    padding: 8px;
+    border: 1px solid var(--hrw-border);
+    border-radius: 10px;
+    background: var(--hrw-bg);
+    box-shadow: 0 6px 18px rgba(15, 23, 42, .1);
 }
 
 .hrw-map-tools button {
-    padding: 7px 12px;
+    width: 100%;
+    padding: 6px 8px;
     border: 1px solid var(--hrw-border);
     border-radius: 8px;
     background: var(--hrw-panel-alt);
     color: var(--hrw-text);
-    font: 700 .78rem/1 Inter, "Segoe UI", Arial, sans-serif;
+    font: 700 .72rem/1.2 Inter, "Segoe UI", Arial, sans-serif;
     cursor: pointer;
 }
 
@@ -552,7 +616,13 @@
     border-radius: 5px;
     font-size: .72rem;
     font-weight: 800;
-    color: #1c1f26;
+    line-height: 1.3;
+}
+
+.hrw-hazard-level-sub {
+    font-size: .64rem;
+    font-weight: 600;
+    opacity: .85;
 }
 
 .hrw-frise {
@@ -666,6 +736,13 @@
 }
 
 @media (max-width: 860px) {
+    /* Sur écran étroit, le résumé national passe seul sur sa propre
+       ligne (pleine largeur) plutôt que de rester plaqué à droite avec un
+       grand vide à gauche (constaté en production sur petit écran). */
+    .hrw-national-summary {
+        flex-basis: 100%;
+        margin-left: 0;
+    }
     .hrw-body {
         grid-template-columns: 1fr;
     }
@@ -673,10 +750,12 @@
         border-right: 0;
         border-bottom: 1px solid var(--hrw-border);
     }
-    .hrw-map-inset-wrap {
+    .hrw-map-inset-column {
         flex-basis: 96px;
         max-width: 96px;
         min-width: 76px;
+    }
+    .hrw-map-inset-wrap {
         padding: 5px;
     }
     .hrw-inset-label {
