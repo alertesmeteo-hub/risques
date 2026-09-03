@@ -632,6 +632,26 @@
                 });
             });
             paintLittoralOverlay();
+            updateHazardTabBorders();
+        }
+
+        // Entoure chaque onglet d'aléa d'une bordure colorée dès qu'une
+        // alerte existe quelque part en France ce jour-là (couleur du
+        // niveau maximal national, cf. nationalMaxLevel) — repérer d'un
+        // coup d'œil quels aléas sont actifs sans avoir à cliquer sur
+        // chaque onglet un par un.
+        function updateHazardTabBorders() {
+            if (!hazardTabs) { return; }
+            Array.prototype.forEach.call(hazardTabs.children, function (button) {
+                var hazard = button.dataset.hazard;
+                if (!hazard) { return; }
+                var level = nationalMaxLevel(hazard, currentDayIndex);
+                if (level > 0) {
+                    button.style.boxShadow = 'inset 0 0 0 2px ' + levelInfo(hazard, level).color;
+                } else {
+                    button.style.boxShadow = '';
+                }
+            });
         }
 
         // Trait de côte coloré par le niveau d'alerte Littoral de chaque
