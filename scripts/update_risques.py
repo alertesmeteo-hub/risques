@@ -45,9 +45,9 @@ except ImportError:  # pragma: no cover - Python < 3.9 non pris en charge ici
 LOGGER = logging.getLogger("risques")
 PIPELINE_VERSION = "2.18.0"
 PARIS_TZ = ZoneInfo("Europe/Paris") if ZoneInfo is not None else timezone.utc
-# La journée météo va de 6 h à 6 h en Europe/Paris. Les heures comprises
-# entre minuit et 6 h restent donc rattachées à la journée précédente.
-DAY_BOUNDARY_HOUR = 6
+# La journée météo va de 5 h à 5 h en Europe/Paris. Les heures comprises
+# entre minuit et 5 h restent donc rattachées à la journée précédente.
+DAY_BOUNDARY_HOUR = 5
 
 
 def _effective_date(moment: datetime) -> date:
