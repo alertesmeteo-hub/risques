@@ -43,7 +43,7 @@ except ImportError:  # pragma: no cover - Python < 3.9 non pris en charge ici
 
 
 LOGGER = logging.getLogger("risques")
-PIPELINE_VERSION = "2.17.1"
+PIPELINE_VERSION = "2.18.0"
 PARIS_TZ = ZoneInfo("Europe/Paris") if ZoneInfo is not None else timezone.utc
 # La journée météo va de 6 h à 6 h en Europe/Paris. Les heures comprises
 # entre minuit et 6 h restent donc rattachées à la journée précédente.
@@ -84,6 +84,21 @@ LITTORAL_DEPARTMENTS = frozenset({
     "66", "11", "34", "30", "13", "83", "06",
     "2A", "2B",
 })
+
+# Départements littoraux façade Méditerranée + Corse — utilisés pour le
+# palier plancher Feu ci-dessous (au-delà de 35°C, le risque feu de forêt y
+# est significatif même par vent faible, contrairement au reste du pays).
+MEDITERRANEAN_DEPARTMENTS = frozenset({"66", "11", "34", "30", "13", "83", "06", "2A", "2B"})
+
+# Palier Feu plancher forcé pour les départements méditerranéens au-delà de
+# cette température, indépendamment de l'humidité/du vent (cf. cocktail
+# feu ci-dessous) : correspond à « Orange » sur la rampe de couleurs à 5
+# paliers (index 2 = _VIGILANCE_ORANGE). Demandé explicitement : une
+# canicule calme (sans tramontane/mistral) à plus de 35°C ne doit pas
+# afficher Nul sur ces départements, le risque feu de forêt y étant réel
+# même sans vent fort.
+FIRE_MEDITERRANEAN_HEAT_THRESHOLD_C = 35.0
+FIRE_MEDITERRANEAN_MIN_LEVEL = 2
 
 # L'ordre d'affichage (onglets, grille de détail) suit l'ordre d'insertion
 # de ce dict, propagé tel quel dans le JSON (``manifest.hazards``) puis lu
@@ -781,6 +796,17 @@ def hourly_hazard_levels(
         # à elle seule, faire naître un risque là où il n'y en a pas.
         if step_index >= 24 and cumulative_precip_mm < 1.0:
             fire_level = min(4, fire_level + 1)
+
+    # Plancher méditerranéen : au-delà de 35°C sur ces départements, le
+    # risque feu de forêt est significatif même si le vent ne franchit pas
+    # le seuil de 20 km/h exigé par le cocktail ci-dessus (ex. canicule
+    # calme, sans tramontane/mistral) — cf. constantes plus haut.
+    if (
+        series.code in MEDITERRANEAN_DEPARTMENTS
+        and np.isfinite(max_temperature)
+        and max_temperature > FIRE_MEDITERRANEAN_HEAT_THRESHOLD_C
+    ):
+        fire_level = max(fire_level, FIRE_MEDITERRANEAN_MIN_LEVEL)
 
     # Orages/grêle : seuil par nombre de points plutôt que perçentile —
     # cf. _localized_risk_level (phénomènes intrinsèquement localisés).
